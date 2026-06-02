@@ -210,8 +210,7 @@ class BaseAgent(ABC):
         if actual_input is not None and actual_output is not None:
             input_price, output_price = self.cost_tracker._get_pricing(model)
             actual_cost = (
-                actual_input * input_price / 1_000_000
-                + actual_output * output_price / 1_000_000
+                actual_input * input_price / 1_000_000 + actual_output * output_price / 1_000_000
             )
             record = CostRecord(
                 agent=self.name,

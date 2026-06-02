@@ -50,9 +50,7 @@ def dump_state(state: ReviewState, output_path: str | Path | None = None) -> Pat
     data = state.model_dump(mode="json", exclude_none=True)
     safe_data = _strip_secrets(data)
 
-    output_path.write_text(
-        json.dumps(safe_data, indent=2, default=str), encoding="utf-8"
-    )
+    output_path.write_text(json.dumps(safe_data, indent=2, default=str), encoding="utf-8")
     logger.info("Debug state dumped", path=str(output_path))
 
     return output_path

@@ -581,9 +581,7 @@ class TestSynthesisAgent:
             summary="summary",
             verdict="comment",
             findings=[
-                Finding(
-                    path="src/main.py", severity=Severity.LOW, category="style", body="test"
-                )
+                Finding(path="src/main.py", severity=Severity.LOW, category="style", body="test")
             ],
             categories=["style"],
         )

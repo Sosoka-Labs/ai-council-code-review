@@ -341,9 +341,7 @@ def post_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
         summary_parts.append("\n**Findings by severity:**\n")
         for severity, count in sorted(
             severity_counts.items(),
-            key=lambda x: {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}.get(
-                x[0], 5
-            ),
+            key=lambda x: {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}.get(x[0], 5),
         ):
             summary_parts.append(f"- {severity.capitalize()}: {count}")
 
@@ -414,18 +412,10 @@ def build_graph(config: CouncilConfig) -> Any:
     # Nodes
     workflow.add_node("ingest", lambda state: ingest_node(state, config))
     workflow.add_node("router", lambda state: router_node(state, config))
-    workflow.add_node(
-        "security", lambda state: security_node(state, config, cost_tracker)
-    )
-    workflow.add_node(
-        "quality", lambda state: quality_node(state, config, cost_tracker)
-    )
-    workflow.add_node(
-        "architecture", lambda state: architecture_node(state, config, cost_tracker)
-    )
-    workflow.add_node(
-        "synthesis", lambda state: synthesis_node(state, config, cost_tracker)
-    )
+    workflow.add_node("security", lambda state: security_node(state, config, cost_tracker))
+    workflow.add_node("quality", lambda state: quality_node(state, config, cost_tracker))
+    workflow.add_node("architecture", lambda state: architecture_node(state, config, cost_tracker))
+    workflow.add_node("synthesis", lambda state: synthesis_node(state, config, cost_tracker))
     workflow.add_node("post", lambda state: post_node(state, config))
 
     # Edges

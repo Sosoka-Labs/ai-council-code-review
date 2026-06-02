@@ -80,14 +80,18 @@ class TestLoadEventPayload:
 
         assert result == payload
 
-    def test_load_event_payload_missing(self, ingestor: PRIngestor, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_load_event_payload_missing(
+        self, ingestor: PRIngestor, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Raise IngestorError when path is missing and env var is not set."""
         monkeypatch.delenv("GITHUB_EVENT_PATH", raising=False)
 
         with pytest.raises(IngestorError, match="GITHUB_EVENT_PATH not set"):
             ingestor.load_event_payload()
 
-    def test_load_event_payload_from_env(self, tmp_path: Path, ingestor: PRIngestor, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_load_event_payload_from_env(
+        self, tmp_path: Path, ingestor: PRIngestor, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Load from GITHUB_EVENT_PATH environment variable."""
         payload = {"action": "opened"}
         event_file = tmp_path / "event.json"
@@ -110,7 +114,9 @@ class TestLoadEventPayload:
 class TestParsePrMetadata:
     """Tests for parse_pr_metadata."""
 
-    def test_parse_pr_metadata(self, ingestor: PRIngestor, realistic_payload: dict[str, Any]) -> None:
+    def test_parse_pr_metadata(
+        self, ingestor: PRIngestor, realistic_payload: dict[str, Any]
+    ) -> None:
         """Parse a realistic payload dict."""
         pr = ingestor.parse_pr_metadata(realistic_payload)
 
@@ -174,6 +180,7 @@ class TestShouldSkip:
     def _make_pr(self, **kwargs: Any) -> Any:
         """Build a PRMetadata with required fields."""
         from ai_council_review.models import PRMetadata
+
         defaults = {
             "number": 1,
             "title": "T",
@@ -340,7 +347,9 @@ class TestIngestFull:
         assert "Draft PR" in reason
         assert files == []
 
-    def test_ingest_full_loads_payload(self, tmp_path: Path, ingestor: PRIngestor, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_ingest_full_loads_payload(
+        self, tmp_path: Path, ingestor: PRIngestor, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """End-to-end loading from GITHUB_EVENT_PATH."""
         payload = {
             "pull_request": {

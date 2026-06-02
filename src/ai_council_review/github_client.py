@@ -241,15 +241,10 @@ class GitHubClient:
 
                 # Track rate limit
                 if "X-RateLimit-Remaining" in response.headers:
-                    self.rate_limit_remaining = int(
-                        response.headers["X-RateLimit-Remaining"]
-                    )
+                    self.rate_limit_remaining = int(response.headers["X-RateLimit-Remaining"])
                     self.check_rate_limit()
 
-                if (
-                    response.status_code == 403
-                    and "rate limit" in response.text.lower()
-                ):
+                if response.status_code == 403 and "rate limit" in response.text.lower():
                     reset_time = int(response.headers.get("X-RateLimit-Reset", 0))
                     wait = reset_time - int(time.time()) + 5
                     if wait > 0 and attempt < max_retries - 1:
@@ -274,7 +269,7 @@ class GitHubClient:
 
             except requests.HTTPError as e:
                 if attempt < max_retries - 1:
-                    delay = min(60, (2 ** attempt) + random.uniform(0, 1))
+                    delay = min(60, (2**attempt) + random.uniform(0, 1))
                     logger.warning(
                         "Retrying GitHub API call after HTTP error",
                         attempt=attempt,
@@ -286,7 +281,7 @@ class GitHubClient:
                 raise GitHubAPIError(f"GitHub API error: {e}") from e
             except requests.RequestException as e:
                 if attempt < max_retries - 1:
-                    delay = min(60, (2 ** attempt) + random.uniform(0, 1))
+                    delay = min(60, (2**attempt) + random.uniform(0, 1))
                     logger.warning(
                         "Retrying GitHub API call after request error",
                         attempt=attempt,

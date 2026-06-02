@@ -62,10 +62,8 @@ class LLMProviderFactory:
                 return func()
             except Exception as e:
                 if not cls._is_transient_error(e) or attempt >= max_retries - 1:
-                    raise LLMProviderError(
-                        f"Failed to initialize LLM provider: {e}"
-                    ) from e
-                delay = min(max_delay, (2 ** attempt) + random.uniform(0, 1))
+                    raise LLMProviderError(f"Failed to initialize LLM provider: {e}") from e
+                delay = min(max_delay, (2**attempt) + random.uniform(0, 1))
                 logger.warning(
                     "LLM initialization failed, retrying...",
                     attempt=attempt + 1,
@@ -105,8 +103,7 @@ class LLMProviderFactory:
         provider_name = provider_name.lower()
         if provider_name not in cls._providers:
             raise LLMProviderError(
-                f"Unsupported provider: {provider_name}. "
-                f"Supported: {list(cls._providers.keys())}"
+                f"Unsupported provider: {provider_name}. Supported: {list(cls._providers.keys())}"
             )
 
         model_cls = cls._providers[provider_name]

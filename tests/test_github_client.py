@@ -46,7 +46,9 @@ class TestGetPrFiles:
             {"filename": "b.py", "status": "added"},
         ]
         page1.headers = {"X-RateLimit-Remaining": "100"}
-        page1.links = {"next": {"url": "https://api.github.com/repos/owner/repo/pulls/42/files?page=2"}}
+        page1.links = {
+            "next": {"url": "https://api.github.com/repos/owner/repo/pulls/42/files?page=2"}
+        }
         page1.raise_for_status = MagicMock()
 
         page2 = MagicMock()
@@ -57,7 +59,9 @@ class TestGetPrFiles:
         page2.raise_for_status = MagicMock()
 
         with (
-            patch("ai_council_review.github_client.requests.request", side_effect=[page1, page2]) as mock_request,
+            patch(
+                "ai_council_review.github_client.requests.request", side_effect=[page1, page2]
+            ) as mock_request,
             patch("ai_council_review.github_client.time.sleep"),
         ):
             files = client.get_pr_files(42)
@@ -78,7 +82,9 @@ class TestGetPrFiles:
         response.raise_for_status = MagicMock()
 
         with (
-            patch("ai_council_review.github_client.requests.request", return_value=response) as mock_request,
+            patch(
+                "ai_council_review.github_client.requests.request", return_value=response
+            ) as mock_request,
             patch("ai_council_review.github_client.time.sleep"),
         ):
             files = client.get_pr_files(42)
@@ -100,7 +106,9 @@ class TestGetPrDiff:
         response.raise_for_status = MagicMock()
 
         with (
-            patch("ai_council_review.github_client.requests.request", return_value=response) as mock_request,
+            patch(
+                "ai_council_review.github_client.requests.request", return_value=response
+            ) as mock_request,
             patch("ai_council_review.github_client.time.sleep"),
         ):
             result = client.get_pr_diff(42)
@@ -123,7 +131,9 @@ class TestGetFileContents:
         response.raise_for_status = MagicMock()
 
         with (
-            patch("ai_council_review.github_client.requests.request", return_value=response) as mock_request,
+            patch(
+                "ai_council_review.github_client.requests.request", return_value=response
+            ) as mock_request,
             patch("ai_council_review.github_client.time.sleep"),
         ):
             result = client.get_file_contents("src/main.py", "main")
@@ -144,7 +154,9 @@ class TestGetFileContents:
         response.raise_for_status.side_effect = requests.HTTPError("404")
 
         with (
-            patch("ai_council_review.github_client.requests.request", return_value=response) as mock_request,
+            patch(
+                "ai_council_review.github_client.requests.request", return_value=response
+            ) as mock_request,
             patch("ai_council_review.github_client.time.sleep"),
         ):
             result = client.get_file_contents("src/missing.py", "main")
@@ -175,7 +187,9 @@ class TestPostReview:
         response.raise_for_status = MagicMock()
 
         with (
-            patch("ai_council_review.github_client.requests.request", return_value=response) as mock_request,
+            patch(
+                "ai_council_review.github_client.requests.request", return_value=response
+            ) as mock_request,
             patch("ai_council_review.github_client.time.sleep"),
         ):
             result = client.post_review(
@@ -204,7 +218,9 @@ class TestPostReview:
         response.raise_for_status = MagicMock()
 
         with (
-            patch("ai_council_review.github_client.requests.request", return_value=response) as mock_request,
+            patch(
+                "ai_council_review.github_client.requests.request", return_value=response
+            ) as mock_request,
             patch("ai_council_review.github_client.time.sleep"),
         ):
             result = client.post_review(
@@ -236,7 +252,9 @@ class TestPostComment:
         response.raise_for_status = MagicMock()
 
         with (
-            patch("ai_council_review.github_client.requests.request", return_value=response) as mock_request,
+            patch(
+                "ai_council_review.github_client.requests.request", return_value=response
+            ) as mock_request,
             patch("ai_council_review.github_client.time.sleep"),
         ):
             result = client.post_comment(42, "Hello from AI")
