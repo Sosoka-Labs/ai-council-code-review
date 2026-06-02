@@ -2,26 +2,38 @@
 
 from __future__ import annotations
 
+import base64
+import random
 import time
 from typing import Any, cast
 
 import requests
+import structlog
 from github import Github
 from github.PullRequest import PullRequest
 from github.Repository import Repository
 
 from ai_council_review.exceptions import GitHubAPIError, RateLimitError
 
+logger = structlog.get_logger()
+
 
 class GitHubClient:
     """Wrapper around PyGithub and raw REST calls with retry logic."""
 
-    def __init__(self, token: str, repo_name: str) -> None:
+    def __init__(
+        self,
+        token: str,
+        repo_name: str,
+        conservative_mode_threshold: int = 50,
+    ) -> None:
         """Initialize the client.
 
         Args:
             token: GitHub token.
             repo_name: Repository in "owner/repo" format.
+            conservative_mode_threshold: Rate limit remaining threshold below which
+                the client enters conservative mode.
         """
         self.token = token
         self.repo_name = repo_name
@@ -29,6 +41,24 @@ class GitHubClient:
         self.repo: Repository = self.g.get_repo(repo_name)
         self.api_calls = 0
         self.rate_limit_remaining: int | None = None
+        self.conservative_mode_threshold = conservative_mode_threshold
+        self.conservative_mode: bool = False
+
+    def check_rate_limit(self) -> None:
+        """Check rate limit and enter conservative mode if below threshold."""
+        if (
+            self.rate_limit_remaining is not None
+            and self.rate_limit_remaining < self.conservative_mode_threshold
+        ):
+            if not self.conservative_mode:
+                logger.warning(
+                    "Entering conservative mode due to low rate limit",
+                    rate_limit_remaining=self.rate_limit_remaining,
+                    threshold=self.conservative_mode_threshold,
+                )
+            self.conservative_mode = True
+        else:
+            self.conservative_mode = False
 
     def get_pull_request(self, number: int) -> PullRequest:
         """Fetch a pull request by number.
@@ -40,6 +70,7 @@ class GitHubClient:
             PullRequest object.
         """
         self.api_calls += 1
+        logger.debug("Fetching pull request", number=number, api_calls=self.api_calls)
         return self.repo.get_pull(number)
 
     def get_pr_files(self, number: int) -> list[dict[str, Any]]:
@@ -72,6 +103,12 @@ class GitHubClient:
                 break
             page += 1
 
+        logger.debug(
+            "Fetched PR files",
+            number=number,
+            file_count=len(all_files),
+            api_calls=self.api_calls,
+        )
         return all_files
 
     def get_pr_diff(self, number: int) -> str:
@@ -90,6 +127,7 @@ class GitHubClient:
             "X-GitHub-Api-Version": "2022-11-28",
         }
         response = self._request("GET", url, headers=headers)
+        logger.debug("Fetched PR diff", number=number, api_calls=self.api_calls)
         return response.text
 
     def get_file_contents(self, path: str, ref: str) -> str | None:
@@ -102,6 +140,14 @@ class GitHubClient:
         Returns:
             File contents as string, or None if not found.
         """
+        if self.conservative_mode:
+            logger.debug(
+                "Skipping file contents in conservative mode",
+                path=path,
+                ref=ref,
+            )
+            return None
+
         url = f"https://api.github.com/repos/{self.repo_name}/contents/{path}"
         headers = {
             "Authorization": f"Bearer {self.token}",
@@ -111,10 +157,9 @@ class GitHubClient:
         try:
             response = self._request("GET", url, headers=headers, params={"ref": ref})
             data = response.json()
-            import base64
-
             return base64.b64decode(data["content"]).decode("utf-8")
         except Exception:
+            logger.debug("File not found", path=path, ref=ref)
             return None
 
     def post_review(
@@ -150,6 +195,7 @@ class GitHubClient:
             payload["commit_id"] = commit_id
 
         response = self._request("POST", url, headers=headers, json=payload)
+        logger.debug("Posted PR review", number=number, api_calls=self.api_calls)
         return cast(dict[str, Any], response.json())
 
     def post_comment(self, number: int, body: str) -> dict[str, Any]:
@@ -169,6 +215,7 @@ class GitHubClient:
             "X-GitHub-Api-Version": "2022-11-28",
         }
         response = self._request("POST", url, headers=headers, json={"body": body})
+        logger.debug("Posted PR comment", number=number, api_calls=self.api_calls)
         return cast(dict[str, Any], response.json())
 
     def _request(self, method: str, url: str, **kwargs: Any) -> requests.Response:
@@ -188,33 +235,65 @@ class GitHubClient:
         """
         max_retries = 3
         for attempt in range(max_retries):
+            self.api_calls += 1
             try:
                 response = requests.request(method, url, timeout=30, **kwargs)
 
                 # Track rate limit
                 if "X-RateLimit-Remaining" in response.headers:
-                    self.rate_limit_remaining = int(response.headers["X-RateLimit-Remaining"])
+                    self.rate_limit_remaining = int(
+                        response.headers["X-RateLimit-Remaining"]
+                    )
+                    self.check_rate_limit()
 
-                if response.status_code == 403 and "rate limit" in response.text.lower():
+                if (
+                    response.status_code == 403
+                    and "rate limit" in response.text.lower()
+                ):
                     reset_time = int(response.headers.get("X-RateLimit-Reset", 0))
                     wait = reset_time - int(time.time()) + 5
                     if wait > 0 and attempt < max_retries - 1:
+                        logger.warning(
+                            "Rate limited by GitHub, waiting until reset",
+                            attempt=attempt,
+                            wait_seconds=wait,
+                        )
                         time.sleep(wait)
                         continue
                     raise RateLimitError("GitHub API rate limit exceeded")
 
                 response.raise_for_status()
-                self.api_calls += 1
+                logger.debug(
+                    "GitHub API request succeeded",
+                    method=method,
+                    url=url,
+                    status_code=response.status_code,
+                    api_calls=self.api_calls,
+                )
                 return response
 
             except requests.HTTPError as e:
                 if attempt < max_retries - 1:
-                    time.sleep(2**attempt)
+                    delay = min(60, (2 ** attempt) + random.uniform(0, 1))
+                    logger.warning(
+                        "Retrying GitHub API call after HTTP error",
+                        attempt=attempt,
+                        delay=delay,
+                        error=str(e),
+                    )
+                    time.sleep(delay)
                     continue
                 raise GitHubAPIError(f"GitHub API error: {e}") from e
             except requests.RequestException as e:
                 if attempt < max_retries - 1:
-                    time.sleep(2**attempt)
+                    delay = min(60, (2 ** attempt) + random.uniform(0, 1))
+                    logger.warning(
+                        "Retrying GitHub API call after request error",
+                        attempt=attempt,
+                        delay=delay,
+                        error=str(e),
+                    )
+                    time.sleep(delay)
                     continue
                 raise GitHubAPIError(f"GitHub API request failed: {e}") from e
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import os
 import sys
@@ -11,6 +12,7 @@ from typing import Any, cast
 import structlog
 
 from ai_council_review.config import load_config
+from ai_council_review.debug import dump_state
 from ai_council_review.github_client import GitHubClient
 from ai_council_review.graph import build_graph
 from ai_council_review.models import FileInfo, ReviewState
@@ -42,6 +44,11 @@ def parse_args() -> argparse.Namespace:
         "--dry-run",
         action="store_true",
         help="Run without posting to GitHub",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Dump debug artifacts after the review",
     )
     return parser.parse_args()
 
@@ -130,6 +137,8 @@ def main() -> int:
         if skipped:
             logger.info("Skipping PR", pr=args.pr_number, reason=skip_reason)
             print(f"Skipping PR #{args.pr_number}: {skip_reason}")
+            if args.debug or os.environ.get("AI_COUNCIL__DEBUG") == "1":
+                dump_state(state)
             return 0
 
         # Fetch changed files from GitHub if not already loaded
@@ -165,10 +174,28 @@ def main() -> int:
                 "skip_reason": state.skip_reason,
             }
             print(json.dumps(dry_run_output, indent=2))
+            if args.debug or os.environ.get("AI_COUNCIL__DEBUG") == "1":
+                dump_state(state)
             return 0
 
         graph = build_graph(config)
-        final_state = cast(ReviewState, graph.invoke(state))
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(graph.invoke, state)
+            try:
+                final_state = cast(ReviewState, future.result(timeout=config.total_timeout_seconds))
+            except concurrent.futures.TimeoutError:
+                logger.error(
+                    "Overall graph timeout",
+                    timeout=config.total_timeout_seconds,
+                )
+                if args.debug or os.environ.get("AI_COUNCIL__DEBUG") == "1":
+                    dump_state(state)
+                return 1
+
+        # Dump debug state if requested
+        if args.debug or os.environ.get("AI_COUNCIL__DEBUG") == "1":
+            dump_state(final_state)
 
         # Print summary
         summary_output: dict[str, Any] = {
@@ -181,6 +208,7 @@ def main() -> int:
             "summary": final_state.summary,
             "skipped": final_state.skipped,
             "skip_reason": final_state.skip_reason,
+            "errors": final_state.errors,
         }
         print(json.dumps(summary_output, indent=2))
         return 0

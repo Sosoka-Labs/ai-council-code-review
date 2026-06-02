@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import os
 from typing import Any
 
@@ -9,11 +10,13 @@ import structlog
 from langgraph.graph import END, StateGraph
 
 from ai_council_review.agents.architecture import ArchitectureAgent
+from ai_council_review.agents.base import BaseAgent
 from ai_council_review.agents.quality import QualityAgent
 from ai_council_review.agents.router import RouterAgent
 from ai_council_review.agents.security import SecurityAgent
 from ai_council_review.agents.synthesis import SynthesisAgent
 from ai_council_review.config import CouncilConfig
+from ai_council_review.cost_tracker import CostTracker
 from ai_council_review.github_client import GitHubClient
 from ai_council_review.models import FileInfo, Finding, ReviewComment, ReviewState
 from ai_council_review.pr_ingestor import PRIngestor
@@ -115,12 +118,61 @@ def router_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
     }
 
 
-def security_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
+def _timed_agent_run(
+    agent: BaseAgent,
+    state: ReviewState,
+    timeout: int,
+) -> dict[str, Any]:
+    """Run an agent with a timeout and graceful degradation.
+
+    Args:
+        agent: The agent to run.
+        state: Current review state.
+        timeout: Timeout in seconds.
+
+    Returns:
+        State updates with agent outputs or empty findings on failure.
+    """
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(agent.run, state)
+        try:
+            findings = future.result(timeout=timeout)
+            return {
+                "agent_outputs": {agent.name: findings},
+            }
+        except concurrent.futures.TimeoutError:
+            logger.warning(
+                "Agent timed out",
+                agent=agent.name,
+                timeout=timeout,
+            )
+            return {
+                "agent_outputs": {agent.name: []},
+                "errors": {agent.name: f"Timed out after {timeout}s"},
+            }
+        except Exception as e:
+            logger.warning(
+                "Agent failed",
+                agent=agent.name,
+                error=str(e),
+            )
+            return {
+                "agent_outputs": {agent.name: []},
+                "errors": {agent.name: f"Failed: {str(e)}"},
+            }
+
+
+def security_node(
+    state: ReviewState,
+    config: CouncilConfig,
+    cost_tracker: CostTracker | None = None,
+) -> dict[str, Any]:
     """Run the security agent.
 
     Args:
         state: Current review state.
         config: Council configuration.
+        cost_tracker: Optional cost tracker for budget enforcement.
 
     Returns:
         Updates to the state.
@@ -130,19 +182,21 @@ def security_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
 
     browser = _get_browser()
     agent = SecurityAgent(config, browser=browser)
-    findings = agent.run(state)
-
-    return {
-        "agent_outputs": {agent.name: findings},
-    }
+    agent.cost_tracker = cost_tracker
+    return _timed_agent_run(agent, state, config.agent_timeout_seconds)
 
 
-def quality_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
+def quality_node(
+    state: ReviewState,
+    config: CouncilConfig,
+    cost_tracker: CostTracker | None = None,
+) -> dict[str, Any]:
     """Run the quality agent.
 
     Args:
         state: Current review state.
         config: Council configuration.
+        cost_tracker: Optional cost tracker for budget enforcement.
 
     Returns:
         Updates to the state.
@@ -152,19 +206,21 @@ def quality_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
 
     browser = _get_browser()
     agent = QualityAgent(config, browser=browser)
-    findings = agent.run(state)
-
-    return {
-        "agent_outputs": {agent.name: findings},
-    }
+    agent.cost_tracker = cost_tracker
+    return _timed_agent_run(agent, state, config.agent_timeout_seconds)
 
 
-def architecture_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
+def architecture_node(
+    state: ReviewState,
+    config: CouncilConfig,
+    cost_tracker: CostTracker | None = None,
+) -> dict[str, Any]:
     """Run the architecture agent.
 
     Args:
         state: Current review state.
         config: Council configuration.
+        cost_tracker: Optional cost tracker for budget enforcement.
 
     Returns:
         Updates to the state.
@@ -174,19 +230,21 @@ def architecture_node(state: ReviewState, config: CouncilConfig) -> dict[str, An
 
     browser = _get_browser()
     agent = ArchitectureAgent(config, browser=browser)
-    findings = agent.run(state)
-
-    return {
-        "agent_outputs": {agent.name: findings},
-    }
+    agent.cost_tracker = cost_tracker
+    return _timed_agent_run(agent, state, config.agent_timeout_seconds)
 
 
-def synthesis_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
+def synthesis_node(
+    state: ReviewState,
+    config: CouncilConfig,
+    cost_tracker: CostTracker | None = None,
+) -> dict[str, Any]:
     """Run the synthesis agent to merge findings.
 
     Args:
         state: Current review state.
         config: Council configuration.
+        cost_tracker: Optional cost tracker for budget enforcement.
 
     Returns:
         Updates to the state.
@@ -283,7 +341,9 @@ def post_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
         summary_parts.append("\n**Findings by severity:**\n")
         for severity, count in sorted(
             severity_counts.items(),
-            key=lambda x: {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}.get(x[0], 5),
+            key=lambda x: {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}.get(
+                x[0], 5
+            ),
         ):
             summary_parts.append(f"- {severity.capitalize()}: {count}")
 
@@ -348,13 +408,24 @@ def build_graph(config: CouncilConfig) -> Any:
     """
     workflow = StateGraph(ReviewState)
 
+    # Initialize cost tracker for the entire graph run
+    cost_tracker = CostTracker(config)
+
     # Nodes
     workflow.add_node("ingest", lambda state: ingest_node(state, config))
     workflow.add_node("router", lambda state: router_node(state, config))
-    workflow.add_node("security", lambda state: security_node(state, config))
-    workflow.add_node("quality", lambda state: quality_node(state, config))
-    workflow.add_node("architecture", lambda state: architecture_node(state, config))
-    workflow.add_node("synthesis", lambda state: synthesis_node(state, config))
+    workflow.add_node(
+        "security", lambda state: security_node(state, config, cost_tracker)
+    )
+    workflow.add_node(
+        "quality", lambda state: quality_node(state, config, cost_tracker)
+    )
+    workflow.add_node(
+        "architecture", lambda state: architecture_node(state, config, cost_tracker)
+    )
+    workflow.add_node(
+        "synthesis", lambda state: synthesis_node(state, config, cost_tracker)
+    )
     workflow.add_node("post", lambda state: post_node(state, config))
 
     # Edges

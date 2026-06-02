@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -66,6 +65,19 @@ class Finding(BaseModel):
     line: int | None = None
 
 
+class CostRecord(BaseModel):
+    """Cost record for a single LLM call."""
+
+    agent: str
+    model: str
+    estimated_input_tokens: int = 0
+    estimated_output_tokens: int = 0
+    actual_input_tokens: int | None = None
+    actual_output_tokens: int | None = None
+    estimated_cost_usd: float = 0.0
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
 class PRMetadata(BaseModel):
     """Metadata about a pull request."""
 
@@ -104,8 +116,10 @@ class ReviewState(BaseModel):
     verdict: str = "comment"
     skipped: bool = False
     skip_reason: str | None = None
-    costs: dict[str, Any] = Field(default_factory=dict)
+    costs: list[CostRecord] = Field(default_factory=list)
+    total_cost_usd: float = 0.0
     api_calls: int = 0
     files_read: list[str] = Field(default_factory=list)
+    errors: dict[str, str] = Field(default_factory=dict)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)

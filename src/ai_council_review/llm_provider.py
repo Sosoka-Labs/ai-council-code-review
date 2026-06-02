@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import random
+import time
+from collections.abc import Callable
 from typing import Any
 
+import structlog
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_fireworks import ChatFireworks
@@ -11,6 +15,8 @@ from langchain_openai import ChatOpenAI
 
 from ai_council_review.config import AgentConfig, ProviderConfig
 from ai_council_review.exceptions import LLMProviderError
+
+logger = structlog.get_logger()
 
 
 class LLMProviderFactory:
@@ -21,6 +27,54 @@ class LLMProviderFactory:
         "openai": ChatOpenAI,
         "anthropic": ChatAnthropic,
     }
+
+    @classmethod
+    def _is_transient_error(cls, exc: Exception) -> bool:
+        """Check if an exception is a transient error that warrants retry.
+
+        Args:
+            exc: The exception to check.
+
+        Returns:
+            True if the error is transient, False otherwise.
+        """
+        if isinstance(exc, ConnectionError | TimeoutError):
+            return True
+        return "rate limit" in str(exc).lower()
+
+    @classmethod
+    def _with_retry(cls, func: Callable[[], BaseChatModel]) -> BaseChatModel:
+        """Execute a function with retry logic for transient errors.
+
+        Args:
+            func: The function to execute.
+
+        Returns:
+            The result of the function.
+
+        Raises:
+            LLMProviderError: If the function fails after all retries.
+        """
+        max_retries = 3
+        max_delay = 30.0
+        for attempt in range(max_retries):
+            try:
+                return func()
+            except Exception as e:
+                if not cls._is_transient_error(e) or attempt >= max_retries - 1:
+                    raise LLMProviderError(
+                        f"Failed to initialize LLM provider: {e}"
+                    ) from e
+                delay = min(max_delay, (2 ** attempt) + random.uniform(0, 1))
+                logger.warning(
+                    "LLM initialization failed, retrying...",
+                    attempt=attempt + 1,
+                    max_retries=max_retries,
+                    delay=delay,
+                    error=str(e),
+                )
+                time.sleep(delay)
+        raise LLMProviderError("Max retries exceeded")
 
     @classmethod
     def create(
@@ -46,12 +100,13 @@ class LLMProviderFactory:
             Configured BaseChatModel instance.
 
         Raises:
-            LLMProviderError: If the provider is not supported.
+            LLMProviderError: If the provider is not supported or initialization fails.
         """
         provider_name = provider_name.lower()
         if provider_name not in cls._providers:
             raise LLMProviderError(
-                f"Unsupported provider: {provider_name}. Supported: {list(cls._providers.keys())}"
+                f"Unsupported provider: {provider_name}. "
+                f"Supported: {list(cls._providers.keys())}"
             )
 
         model_cls = cls._providers[provider_name]
@@ -73,10 +128,10 @@ class LLMProviderFactory:
 
         init_kwargs.update(kwargs)
 
-        try:
+        def _init() -> BaseChatModel:
             return model_cls(**init_kwargs)
-        except Exception as e:
-            raise LLMProviderError(f"Failed to initialize {provider_name} provider: {e}") from e
+
+        return cls._with_retry(_init)
 
     @classmethod
     def from_config(

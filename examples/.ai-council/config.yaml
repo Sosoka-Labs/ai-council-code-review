@@ -1,0 +1,101 @@
+# AI Council Code Review — Example Configuration
+#
+# Copy this file to .ai-council/config.yaml in your repository root
+# to customize agents, models, and review behavior.
+#
+# If this file is missing, AI Council uses sensible defaults.
+
+version: "1"
+
+# ── Review Settings ─────────────────────────────────────────────────────────
+review_depth: standard          # "standard" | "deep"
+max_files: 50                   # Skip PRs with more than this many files
+max_lines: 2000                 # Skip PRs with more than this many changed lines
+max_diff_size: 50000            # Skip PRs with diff larger than this (bytes)
+comment_on_forks: false         # Skip commenting on fork PRs by default
+skip_drafts: true               # Skip draft PRs
+skip_labels:                    # Skip PRs with any of these labels
+  - "skip-ai-review"
+  - "wip"
+skip_patterns:                  # Skip files matching these patterns
+  - "package-lock.json"
+  - "yarn.lock"
+  - "poetry.lock"
+  - "Cargo.lock"
+  - "Gemfile.lock"
+  - "*.snap"
+  - "dist/"
+  - "build/"
+  - "node_modules/"
+
+# ── Cost & Timeout Control ──────────────────────────────────────────────────
+budget_usd: 5.00                # Max estimated cost per PR
+agent_timeout_seconds: 300      # Per-agent timeout (5 minutes)
+total_timeout_seconds: 600      # Overall workflow timeout (10 minutes)
+debug: false                    # Dump debug artifact when true
+rate_limit_threshold: 50        # Enter conservative mode below this threshold
+
+# ── Agent Configuration ─────────────────────────────────────────────────────
+# Each agent can be enabled/disabled, assigned a model and provider,
+# and given a custom system prompt.
+#
+# `model` is the provider name: fireworks, openai, or anthropic
+# `model_name` is the full model identifier the provider expects
+# `temperature` controls creativity vs determinism
+# `max_tokens` caps the response length
+
+agents:
+  # Router decides which specialist agents to invoke based on the PR diff.
+  # Use a fast, cheap model here — it only classifies.
+  router:
+    enabled: true
+    model: fireworks
+    model_name: accounts/fireworks/models/llama-v3p1-70b-instruct
+    temperature: 0.1
+    max_tokens: 2000
+
+  # Security checks for vulnerabilities, secrets, auth issues, and injection risks.
+  security:
+    enabled: true
+    model: fireworks
+    model_name: accounts/fireworks/models/llama-v3p1-70b-instruct
+    temperature: 0.2
+    max_tokens: 4000
+
+  # Quality checks for bugs, logic errors, type safety, missing tests, and readability.
+  quality:
+    enabled: true
+    model: fireworks
+    model_name: accounts/fireworks/models/llama-v3p1-70b-instruct
+    temperature: 0.3
+    max_tokens: 4000
+
+  # Architecture checks cross-file impact, documentation freshness, API consistency,
+  # and dependency alignment. This is the primary agent for repository browsing.
+  architecture:
+    enabled: true
+    model: fireworks
+    model_name: accounts/fireworks/models/llama-v3p1-70b-instruct
+    temperature: 0.3
+    max_tokens: 4000
+
+  # Synthesis merges all agent outputs, deduplicates, prioritizes, and formats
+  # the final review. Use a strong reasoning model here.
+  synthesis:
+    enabled: true
+    model: fireworks
+    model_name: accounts/fireworks/models/llama-v3p1-70b-instruct
+    temperature: 0.2
+    max_tokens: 4000
+
+# ── LLM Provider Settings ───────────────────────────────────────────────────
+# API keys are loaded from environment variables (AI_COUNCIL__FIREWORKS_API_KEY, etc.)
+# but you can hardcode them here if needed (not recommended for public repos).
+
+providers:
+  fireworks:
+    api_key: null
+  openai:
+    api_key: null
+  anthropic:
+    api_key: null

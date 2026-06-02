@@ -64,6 +64,18 @@ class PRIngestor:
         head_repo = head.get("repo", {})
         base_repo = base.get("repo", {})
 
+        is_fork = head_repo.get("full_name", "") != base_repo.get("full_name", "")
+        fork_url = head_repo.get("html_url", "") if is_fork else None
+
+        logger.info(
+            "Parsed PR metadata",
+            pr_number=pr.get("number", 0),
+            is_fork=is_fork,
+            fork_url=fork_url,
+            head_repo=head_repo.get("full_name", ""),
+            base_repo=base_repo.get("full_name", ""),
+        )
+
         return PRMetadata(
             number=pr.get("number", 0),
             title=pr.get("title", ""),
@@ -85,7 +97,7 @@ class PRIngestor:
             commits=pr.get("commits", 0),
             created_at=pr.get("created_at"),
             updated_at=pr.get("updated_at"),
-            is_fork=head_repo.get("full_name", "") != base_repo.get("full_name", ""),
+            is_fork=is_fork,
         )
 
     def should_skip(self, pr: PRMetadata) -> tuple[bool, str]:
@@ -101,6 +113,12 @@ class PRIngestor:
             return True, "Draft PR"
 
         if pr.is_fork and not self.config.comment_on_forks:
+            logger.warning(
+                "Skipping fork PR",
+                pr=pr.number,
+                comment_on_forks=self.config.comment_on_forks,
+                is_fork=pr.is_fork,
+            )
             return True, "Fork PR (comment_on_forks disabled)"
 
         label_names = {label.lower() for label in pr.labels}

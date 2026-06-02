@@ -53,6 +53,10 @@ class CouncilConfig(BaseModel):
         ]
     )
     budget_usd: float = 5.0
+    agent_timeout_seconds: int = 300
+    total_timeout_seconds: int = 600
+    debug: bool = False
+    rate_limit_threshold: int = 50
     agents: dict[str, AgentConfig] = Field(default_factory=dict)
     providers: dict[str, ProviderConfig] = Field(default_factory=dict)
 
