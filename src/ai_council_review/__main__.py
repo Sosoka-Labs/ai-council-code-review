@@ -6,13 +6,14 @@ import argparse
 import json
 import os
 import sys
-from typing import Any
+from typing import Any, cast
 
 import structlog
 
 from ai_council_review.config import load_config
 from ai_council_review.github_client import GitHubClient
-from ai_council_review.models import FileInfo
+from ai_council_review.graph import build_graph
+from ai_council_review.models import FileInfo, ReviewState
 from ai_council_review.pr_ingestor import PRIngestor
 
 logger = structlog.get_logger()
@@ -36,6 +37,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", type=str, default=None, help="Path to config YAML file")
     parser.add_argument(
         "--event-path", type=str, default=None, help="Path to GitHub event payload JSON"
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Run without posting to GitHub",
     )
     return parser.parse_args()
 
@@ -71,9 +77,11 @@ def main() -> int:
         config = load_config(args.config)
         logger.info("Config loaded", config_path=args.config or ".ai-council/config.yaml")
 
-        ingestor = PRIngestor(config)
+        # Build initial state
+        state = ReviewState()
 
-        # Try to load event payload
+        # Load PR metadata from event payload or CLI args
+        ingestor = PRIngestor(config)
         payload: dict[str, Any] | None = None
         if args.event_path:
             payload = ingestor.load_event_payload(args.event_path)
@@ -83,7 +91,6 @@ def main() -> int:
         if payload:
             pr, files, skipped, skip_reason = ingestor.ingest(payload)
         else:
-            # Build minimal PR metadata from CLI args
             pr = ingestor.parse_pr_metadata(
                 {
                     "pull_request": {
@@ -115,14 +122,19 @@ def main() -> int:
             skipped, skip_reason = ingestor.should_skip(pr)
             files = []
 
+        state.pr_metadata = pr
+        state.skipped = skipped
+        state.skip_reason = skip_reason
+        state.changed_files = files
+
         if skipped:
             logger.info("Skipping PR", pr=args.pr_number, reason=skip_reason)
             print(f"Skipping PR #{args.pr_number}: {skip_reason}")
             return 0
 
-        # Fetch changed files from GitHub
+        # Fetch changed files from GitHub if not already loaded
         token = os.environ.get("GITHUB_TOKEN")
-        if token:
+        if token and not state.changed_files:
             client = GitHubClient(token, args.repo)
             raw_files = client.get_pr_files(args.pr_number)
             files = [
@@ -139,17 +151,38 @@ def main() -> int:
                 )
                 for f in raw_files
             ]
-            files = ingestor.filter_files(files)
+            state.changed_files = ingestor.filter_files(files)
 
-        # Print structured output
-        output = {
-            "pr": pr.model_dump(mode="json"),
-            "files": [f.model_dump(mode="json") for f in files],
-            "api_calls": getattr(client, "api_calls", 0) if token else 0,
-            "skipped": skipped,
-            "skip_reason": skip_reason,
+        # Build and run the graph
+        if args.dry_run:
+            logger.info("Dry run mode — not posting to GitHub")
+            # In dry-run mode, we skip the post step by not running the graph
+            # Just print the state
+            dry_run_output = {
+                "pr": state.pr_metadata.model_dump(mode="json") if state.pr_metadata else None,
+                "files": [f.model_dump(mode="json") for f in state.changed_files],
+                "skipped": state.skipped,
+                "skip_reason": state.skip_reason,
+            }
+            print(json.dumps(dry_run_output, indent=2))
+            return 0
+
+        graph = build_graph(config)
+        final_state = cast(ReviewState, graph.invoke(state))
+
+        # Print summary
+        summary_output: dict[str, Any] = {
+            "pr": final_state.pr_metadata.model_dump(mode="json")
+            if final_state.pr_metadata
+            else None,
+            "files_reviewed": len(final_state.changed_files),
+            "findings": sum(len(f) for f in final_state.agent_outputs.values()),
+            "verdict": final_state.verdict,
+            "summary": final_state.summary,
+            "skipped": final_state.skipped,
+            "skip_reason": final_state.skip_reason,
         }
-        print(json.dumps(output, indent=2))
+        print(json.dumps(summary_output, indent=2))
         return 0
 
     except Exception as e:

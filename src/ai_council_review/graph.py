@@ -1,0 +1,236 @@
+"""LangGraph state machine for AI Council Code Review."""
+
+from __future__ import annotations
+
+import os
+from typing import Any
+
+import structlog
+from langgraph.graph import END, StateGraph
+
+from ai_council_review.agents.generalist import GeneralistAgent
+from ai_council_review.config import CouncilConfig
+from ai_council_review.github_client import GitHubClient
+from ai_council_review.models import FileInfo, Finding, ReviewComment, ReviewState
+from ai_council_review.pr_ingestor import PRIngestor
+from ai_council_review.publisher import Publisher
+from ai_council_review.repository_browser import RepositoryBrowser
+
+logger = structlog.get_logger()
+
+
+def ingest_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
+    """Ingest PR metadata and changed files.
+
+    Args:
+        state: Current review state.
+        config: Council configuration.
+
+    Returns:
+        Updates to the state.
+    """
+    logger.info("Ingest node starting")
+    ingestor = PRIngestor(config)
+
+    # Load from environment if available
+    payload = None
+    if os.environ.get("GITHUB_EVENT_PATH"):
+        payload = ingestor.load_event_payload()
+
+    pr, files, skipped, skip_reason = ingestor.ingest(payload)
+
+    if skipped:
+        return {
+            "pr_metadata": pr,
+            "skipped": True,
+            "skip_reason": skip_reason,
+        }
+
+    # Fetch files from GitHub if we have a token
+    token = os.environ.get("GITHUB_TOKEN")
+    if token and pr:
+        client = GitHubClient(
+            token,
+            pr.html_url.split("/")[-2] + "/" + pr.html_url.split("/")[-1] if pr.html_url else "",
+        )
+        # Actually we need repo from the payload, not from html_url
+        # Let's use a more robust approach
+        repo = os.environ.get("GITHUB_REPOSITORY", "")
+        if repo:
+            client = GitHubClient(token, repo)
+            raw_files = client.get_pr_files(pr.number)
+            files = [
+                FileInfo(
+                    filename=f["filename"],
+                    status=f["status"],
+                    additions=f.get("additions", 0),
+                    deletions=f.get("deletions", 0),
+                    changes=f.get("changes", 0),
+                    patch=f.get("patch"),
+                    previous_filename=f.get("previous_filename"),
+                    sha=f.get("sha"),
+                    raw_url=f.get("raw_url"),
+                )
+                for f in raw_files
+            ]
+            files = ingestor.filter_files(files)
+
+    return {
+        "pr_metadata": pr,
+        "changed_files": files,
+        "skipped": skipped,
+        "skip_reason": skip_reason,
+    }
+
+
+def review_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
+    """Run the generalist agent to review the PR.
+
+    Args:
+        state: Current review state.
+        config: Council configuration.
+
+    Returns:
+        Updates to the state.
+    """
+    logger.info("Review node starting")
+
+    if state.skipped:
+        return {}
+
+    if not state.changed_files:
+        logger.info("No files to review")
+        return {}
+
+    # Setup browser
+    browser = None
+    token = os.environ.get("GITHUB_TOKEN")
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    if token and repo:
+        client = GitHubClient(token, repo)
+        browser = RepositoryBrowser(github_client=client)
+
+    agent = GeneralistAgent(config, browser=browser)
+    findings = agent.run(state)
+
+    return {
+        "agent_outputs": {agent.name: findings},
+    }
+
+
+def post_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
+    """Post the review to GitHub.
+
+    Args:
+        state: Current review state.
+        config: Council configuration.
+
+    Returns:
+        Updates to the state.
+    """
+    logger.info("Post node starting")
+
+    if state.skipped:
+        logger.info("PR skipped, nothing to post", reason=state.skip_reason)
+        return {}
+
+    token = os.environ.get("GITHUB_TOKEN")
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    if not token or not repo or not state.pr_metadata:
+        logger.warning("Missing token, repo, or PR metadata — skipping post")
+        return {}
+
+    client = GitHubClient(token, repo)
+    publisher = Publisher(client)
+
+    # Build findings from all agents
+    all_findings: list[Finding] = []
+    for agent_findings in state.agent_outputs.values():
+        all_findings.extend(agent_findings)
+
+    if not all_findings:
+        logger.info("No findings to post")
+        # Post a summary saying no issues found
+        summary = "## AI Code Review\n\nNo issues found in this PR. ✅"
+        publisher.post_review(
+            pr_number=state.pr_metadata.number,
+            summary=summary,
+            comments=[],
+            commit_id=state.pr_metadata.head_sha,
+        )
+        return {
+            "summary": summary,
+            "verdict": "approve",
+        }
+
+    # Convert findings to ReviewComments
+    comments: list[ReviewComment] = []
+    for finding in all_findings:
+        if finding.position is not None:
+            comments.append(
+                ReviewComment(
+                    path=finding.path,
+                    position=finding.position,
+                    body=finding.body,
+                )
+            )
+
+    # Validate comments against changed files
+    comments = publisher.validate_comments(comments, state.changed_files)
+
+    # Build summary
+    summary_parts = ["## AI Code Review\n"]
+    severity_counts: dict[str, int] = {}
+    for finding in all_findings:
+        severity_counts[finding.severity.value] = severity_counts.get(finding.severity.value, 0) + 1
+
+    summary_parts.append("\n**Findings by severity:**\n")
+    for severity, count in sorted(
+        severity_counts.items(),
+        key=lambda x: {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}.get(x[0], 5),
+    ):
+        summary_parts.append(f"- {severity.capitalize()}: {count}")
+
+    summary_parts.append(f"\n**Total findings:** {len(all_findings)}")
+    summary_parts.append(
+        "\n---\n\n*This review was generated automatically. Please verify all suggestions before applying.*"
+    )
+    summary = "\n".join(summary_parts)
+
+    publisher.post_review(
+        pr_number=state.pr_metadata.number,
+        summary=summary,
+        comments=comments,
+        commit_id=state.pr_metadata.head_sha,
+    )
+
+    return {
+        "summary": summary,
+        "github_comments": comments,
+        "verdict": "comment",
+    }
+
+
+def build_graph(config: CouncilConfig) -> Any:
+    """Build the LangGraph state machine.
+
+    Args:
+        config: Council configuration.
+
+    Returns:
+        Compiled StateGraph.
+    """
+    workflow = StateGraph(ReviewState)
+
+    # Nodes
+    workflow.add_node("ingest", lambda state: ingest_node(state, config))
+    workflow.add_node("review", lambda state: review_node(state, config))
+    workflow.add_node("post", lambda state: post_node(state, config))
+
+    # Edges
+    workflow.set_entry_point("ingest")
+    workflow.add_edge("ingest", "review")
+    workflow.add_edge("review", "post")
+    workflow.add_edge("post", END)
+
+    return workflow.compile()
