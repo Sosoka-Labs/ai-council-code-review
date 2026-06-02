@@ -1,0 +1,38 @@
+[
+  {
+    "sha": "bbcd538c8e72b8c175046e27cc8f907076331401",
+    "filename": "src/main.py",
+    "status": "modified",
+    "additions": 10,
+    "deletions": 2,
+    "changes": 12,
+    "blob_url": "https://github.com/octocat/Hello-World/blob/6dcb09b5b57875f334f61aebed695e2e4193db5e/src/main.py",
+    "raw_url": "https://github.com/octocat/Hello-World/raw/6dcb09b5b57875f334f61aebed695e2e4193db5e/src/main.py",
+    "contents_url": "https://api.github.com/repos/octocat/Hello-World/contents/src/main.py?ref=6dcb09b5b57875f334f61aebed695e2e4193db5e",
+    "patch": "@@ -132,7 +132,7 @@ module Test\n-def old_function():\n+def new_function():\n     pass\n"
+  },
+  {
+    "sha": "abc123def456",
+    "filename": "tests/test_main.py",
+    "status": "added",
+    "additions": 50,
+    "deletions": 0,
+    "changes": 50,
+    "blob_url": "https://github.com/octocat/Hello-World/blob/6dcb09b5b57875f334f61aebed695e2e4193db5e/tests/test_main.py",
+    "raw_url": "https://github.com/octocat/Hello-World/raw/6dcb09b5b57875f334f61aebed695e2e4193db5e/tests/test_main.py",
+    "contents_url": "https://api.github.com/repos/octocat/Hello-World/contents/tests/test_main.py?ref=6dcb09b5b57875f334f61aebed695e2e4193db5e",
+    "patch": "@@ -0,0 +1,50 @@\n+import pytest\n+from main import new_function\n+\n+def test_new_function():\n+    assert new_function() is None\n"
+  },
+  {
+    "sha": "lockfile789",
+    "filename": "package-lock.json",
+    "status": "modified",
+    "additions": 200,
+    "deletions": 100,
+    "changes": 300,
+    "blob_url": "https://github.com/octocat/Hello-World/blob/6dcb09b5b57875f334f61aebed695e2e4193db5e/package-lock.json",
+    "raw_url": "https://github.com/octocat/Hello-World/raw/6dcb09b5b57875f334f61aebed695e2e4193db5e/package-lock.json",
+    "contents_url": "https://api.github.com/repos/octocat/Hello-World/contents/package-lock.json?ref=6dcb09b5b57875f334f61aebed695e2e4193db5e",
+    "patch": ""
+  }
+]

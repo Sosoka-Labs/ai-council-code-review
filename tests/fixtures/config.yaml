@@ -1,0 +1,70 @@
+version: "1"
+review_depth: standard
+max_files: 50
+max_lines: 2000
+max_diff_size: 50000
+comment_on_forks: false
+skip_drafts: true
+skip_labels:
+  - wip
+  - do-not-review
+skip_patterns:
+  - package-lock.json
+  - yarn.lock
+  - poetry.lock
+  - Cargo.lock
+  - Gemfile.lock
+  - "*.snap"
+  - dist/
+  - build/
+  - node_modules/
+budget_usd: 5.0
+
+agents:
+  router:
+    enabled: true
+    model: fireworks
+    model_name: accounts/fireworks/models/llama-v3p1-70b-instruct
+    temperature: 0.1
+    max_tokens: 2000
+
+  security:
+    enabled: true
+    model: fireworks
+    model_name: accounts/fireworks/models/llama-v3p1-70b-instruct
+    temperature: 0.2
+    max_tokens: 4000
+
+  quality:
+    enabled: true
+    model: fireworks
+    model_name: accounts/fireworks/models/llama-v3p1-70b-instruct
+    temperature: 0.3
+    max_tokens: 4000
+
+  architecture:
+    enabled: true
+    model: fireworks
+    model_name: accounts/fireworks/models/llama-v3p1-70b-instruct
+    temperature: 0.3
+    max_tokens: 4000
+
+  synthesis:
+    enabled: true
+    model: fireworks
+    model_name: accounts/fireworks/models/llama-v3p1-70b-instruct
+    temperature: 0.2
+    max_tokens: 4000
+
+providers:
+  fireworks:
+    api_key: null
+    base_url: null
+
+  openai:
+    api_key: null
+    base_url: null
+
+  anthropic:
+    api_key: null
+    base_url: null
