@@ -8,7 +8,11 @@ from typing import Any
 import structlog
 from langgraph.graph import END, StateGraph
 
-from ai_council_review.agents.generalist import GeneralistAgent
+from ai_council_review.agents.architecture import ArchitectureAgent
+from ai_council_review.agents.quality import QualityAgent
+from ai_council_review.agents.router import RouterAgent
+from ai_council_review.agents.security import SecurityAgent
+from ai_council_review.agents.synthesis import SynthesisAgent
 from ai_council_review.config import CouncilConfig
 from ai_council_review.github_client import GitHubClient
 from ai_council_review.models import FileInfo, Finding, ReviewComment, ReviewState
@@ -49,12 +53,6 @@ def ingest_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
     # Fetch files from GitHub if we have a token
     token = os.environ.get("GITHUB_TOKEN")
     if token and pr:
-        client = GitHubClient(
-            token,
-            pr.html_url.split("/")[-2] + "/" + pr.html_url.split("/")[-1] if pr.html_url else "",
-        )
-        # Actually we need repo from the payload, not from html_url
-        # Let's use a more robust approach
         repo = os.environ.get("GITHUB_REPOSITORY", "")
         if repo:
             client = GitHubClient(token, repo)
@@ -83,17 +81,17 @@ def ingest_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
     }
 
 
-def review_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
-    """Run the generalist agent to review the PR.
+def router_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
+    """Run the router agent to decide which agents are needed.
 
     Args:
         state: Current review state.
         config: Council configuration.
 
     Returns:
-        Updates to the state.
+        Updates to the state with routing decision.
     """
-    logger.info("Review node starting")
+    logger.info("Router node starting")
 
     if state.skipped:
         return {}
@@ -102,19 +100,113 @@ def review_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
         logger.info("No files to review")
         return {}
 
-    # Setup browser
-    browser = None
-    token = os.environ.get("GITHUB_TOKEN")
-    repo = os.environ.get("GITHUB_REPOSITORY", "")
-    if token and repo:
-        client = GitHubClient(token, repo)
-        browser = RepositoryBrowser(github_client=client)
+    router = RouterAgent(config)
+    result = router.run(state)
 
-    agent = GeneralistAgent(config, browser=browser)
+    logger.info(
+        "Router complete",
+        agents=result.agents_needed,
+        depth=result.review_depth,
+    )
+
+    return {
+        "agents_needed": result.agents_needed,
+        "review_depth": result.review_depth,
+    }
+
+
+def security_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
+    """Run the security agent.
+
+    Args:
+        state: Current review state.
+        config: Council configuration.
+
+    Returns:
+        Updates to the state.
+    """
+    if state.skipped:
+        return {}
+
+    browser = _get_browser()
+    agent = SecurityAgent(config, browser=browser)
     findings = agent.run(state)
 
     return {
         "agent_outputs": {agent.name: findings},
+    }
+
+
+def quality_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
+    """Run the quality agent.
+
+    Args:
+        state: Current review state.
+        config: Council configuration.
+
+    Returns:
+        Updates to the state.
+    """
+    if state.skipped:
+        return {}
+
+    browser = _get_browser()
+    agent = QualityAgent(config, browser=browser)
+    findings = agent.run(state)
+
+    return {
+        "agent_outputs": {agent.name: findings},
+    }
+
+
+def architecture_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
+    """Run the architecture agent.
+
+    Args:
+        state: Current review state.
+        config: Council configuration.
+
+    Returns:
+        Updates to the state.
+    """
+    if state.skipped:
+        return {}
+
+    browser = _get_browser()
+    agent = ArchitectureAgent(config, browser=browser)
+    findings = agent.run(state)
+
+    return {
+        "agent_outputs": {agent.name: findings},
+    }
+
+
+def synthesis_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
+    """Run the synthesis agent to merge findings.
+
+    Args:
+        state: Current review state.
+        config: Council configuration.
+
+    Returns:
+        Updates to the state.
+    """
+    logger.info("Synthesis node starting")
+
+    if state.skipped:
+        return {}
+
+    if not state.agent_outputs:
+        logger.info("No agent outputs to synthesize")
+        return {}
+
+    agent = SynthesisAgent(config)
+    result = agent.run(state)
+
+    return {
+        "summary": result.summary,
+        "verdict": result.verdict,
+        "agent_outputs": {"synthesis": result.findings},
     }
 
 
@@ -143,14 +235,14 @@ def post_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
     client = GitHubClient(token, repo)
     publisher = Publisher(client)
 
-    # Build findings from all agents
+    # Build findings from all agents (excluding synthesis)
     all_findings: list[Finding] = []
-    for agent_findings in state.agent_outputs.values():
-        all_findings.extend(agent_findings)
+    for agent_name, agent_findings in state.agent_outputs.items():
+        if agent_name != "synthesis":
+            all_findings.extend(agent_findings)
 
     if not all_findings:
         logger.info("No findings to post")
-        # Post a summary saying no issues found
         summary = "## AI Code Review\n\nNo issues found in this PR. ✅"
         publisher.post_review(
             pr_number=state.pr_metadata.number,
@@ -178,41 +270,75 @@ def post_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
     # Validate comments against changed files
     comments = publisher.validate_comments(comments, state.changed_files)
 
-    # Build summary
-    summary_parts = ["## AI Code Review\n"]
-    severity_counts: dict[str, int] = {}
-    for finding in all_findings:
-        severity_counts[finding.severity.value] = severity_counts.get(finding.severity.value, 0) + 1
+    # Build summary from synthesis if available
+    summary_text: str = state.summary or ""
+    if not summary_text:
+        summary_parts = ["## AI Code Review\n"]
+        severity_counts: dict[str, int] = {}
+        for finding in all_findings:
+            severity_counts[finding.severity.value] = (
+                severity_counts.get(finding.severity.value, 0) + 1
+            )
 
-    summary_parts.append("\n**Findings by severity:**\n")
-    for severity, count in sorted(
-        severity_counts.items(),
-        key=lambda x: {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}.get(x[0], 5),
-    ):
-        summary_parts.append(f"- {severity.capitalize()}: {count}")
+        summary_parts.append("\n**Findings by severity:**\n")
+        for severity, count in sorted(
+            severity_counts.items(),
+            key=lambda x: {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}.get(x[0], 5),
+        ):
+            summary_parts.append(f"- {severity.capitalize()}: {count}")
 
-    summary_parts.append(f"\n**Total findings:** {len(all_findings)}")
-    summary_parts.append(
-        "\n---\n\n*This review was generated automatically. Please verify all suggestions before applying.*"
-    )
-    summary = "\n".join(summary_parts)
+        summary_parts.append(f"\n**Total findings:** {len(all_findings)}")
+        summary_parts.append(
+            "\n---\n\n*This review was generated automatically. Please verify all suggestions before applying.*"
+        )
+        summary_text = "\n".join(summary_parts)
+
+    verdict = state.verdict or "comment"
 
     publisher.post_review(
         pr_number=state.pr_metadata.number,
-        summary=summary,
+        summary=summary_text,
         comments=comments,
         commit_id=state.pr_metadata.head_sha,
     )
 
     return {
-        "summary": summary,
+        "summary": summary_text,
         "github_comments": comments,
-        "verdict": "comment",
+        "verdict": verdict,
     }
 
 
+def _get_browser() -> RepositoryBrowser | None:
+    """Create a RepositoryBrowser if GitHub token is available.
+
+    Returns:
+        RepositoryBrowser or None.
+    """
+    token = os.environ.get("GITHUB_TOKEN")
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    if token and repo:
+        client = GitHubClient(token, repo)
+        return RepositoryBrowser(github_client=client)
+    return None
+
+
+def _route_from_router(state: ReviewState) -> list[str]:
+    """Determine which agents to run based on router output.
+
+    Args:
+        state: Current review state.
+
+    Returns:
+        List of agent node names to execute.
+    """
+    agents = getattr(state, "agents_needed", ["security", "quality", "architecture"])
+    valid_agents = {"security", "quality", "architecture"}
+    return [a for a in agents if a in valid_agents]
+
+
 def build_graph(config: CouncilConfig) -> Any:
-    """Build the LangGraph state machine.
+    """Build the LangGraph state machine with multi-agent routing.
 
     Args:
         config: Council configuration.
@@ -224,13 +350,33 @@ def build_graph(config: CouncilConfig) -> Any:
 
     # Nodes
     workflow.add_node("ingest", lambda state: ingest_node(state, config))
-    workflow.add_node("review", lambda state: review_node(state, config))
+    workflow.add_node("router", lambda state: router_node(state, config))
+    workflow.add_node("security", lambda state: security_node(state, config))
+    workflow.add_node("quality", lambda state: quality_node(state, config))
+    workflow.add_node("architecture", lambda state: architecture_node(state, config))
+    workflow.add_node("synthesis", lambda state: synthesis_node(state, config))
     workflow.add_node("post", lambda state: post_node(state, config))
 
     # Edges
     workflow.set_entry_point("ingest")
-    workflow.add_edge("ingest", "review")
-    workflow.add_edge("review", "post")
+    workflow.add_edge("ingest", "router")
+
+    # Conditional routing from router
+    # LangGraph doesn't support dynamic conditional edges easily in v0.0.x,
+    # so we'll run all agents in parallel and let them skip if not needed.
+    # In v0.1.x, we could use Send() for conditional routing.
+    # For now: router -> all agents in parallel
+    workflow.add_edge("router", "security")
+    workflow.add_edge("router", "quality")
+    workflow.add_edge("router", "architecture")
+
+    # Parallel agents converge to synthesis
+    workflow.add_edge("security", "synthesis")
+    workflow.add_edge("quality", "synthesis")
+    workflow.add_edge("architecture", "synthesis")
+
+    # Synthesis -> post
+    workflow.add_edge("synthesis", "post")
     workflow.add_edge("post", END)
 
     return workflow.compile()
