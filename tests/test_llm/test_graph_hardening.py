@@ -2,59 +2,21 @@
 
 from __future__ import annotations
 
-import time
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from ai_council_review.config import CouncilConfig
-from ai_council_review.llm.cost_tracker import CostTracker
-from ai_council_review.llm.graph import (
-    _timed_agent_run,
-    security_node,
-)
+from ai_council_review.llm.cost_tracker import CostCallbackHandler, CostTracker
+from ai_council_review.llm.graph import security_node
 from ai_council_review.models import ReviewState
-
-
-class TestAgentTimeout:
-    """Tests for agent timeout handling."""
-
-    def test_agent_timeout_returns_empty(self) -> None:
-        """Mock agent that sleeps, verify timeout returns empty findings."""
-        mock_agent = MagicMock()
-        mock_agent.name = "security"
-        mock_agent.run.side_effect = lambda state: time.sleep(0.2)
-
-        state = ReviewState()
-        result = _timed_agent_run(mock_agent, state, timeout=0.1)
-
-        assert result["agent_outputs"]["security"] == []
-        assert "errors" in result
-        assert result["errors"]["security"] == "Timed out after 0.1s"
-
-
-class TestAgentException:
-    """Tests for agent exception handling."""
-
-    def test_agent_exception_returns_empty(self) -> None:
-        """Mock agent that raises, verify graceful degradation."""
-        mock_agent = MagicMock()
-        mock_agent.name = "quality"
-        mock_agent.run.side_effect = RuntimeError("Agent crashed")
-
-        state = ReviewState()
-        result = _timed_agent_run(mock_agent, state, timeout=5)
-
-        assert result["agent_outputs"]["quality"] == []
-        assert "errors" in result
-        assert result["errors"]["quality"] == "Failed: Agent crashed"
 
 
 class TestCostTrackerIntegration:
     """Tests for cost tracker integration in graph nodes."""
 
     def test_cost_tracker_passed_to_agents(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Verify CostTracker is initialized and passed to agents."""
+        """Verify security_node invokes run_security_agent with correct args."""
         mock_tracker = MagicMock(spec=CostTracker)
         state = ReviewState()
         config = CouncilConfig()
@@ -64,13 +26,16 @@ class TestCostTrackerIntegration:
             lambda: None,
         )
 
-        with patch("ai_council_review.llm.graph.SecurityAgent") as mock_agent_cls:
-            mock_agent = MagicMock()
-            mock_agent.run.return_value = []
-            mock_agent.name = "security"
-            mock_agent_cls.return_value = mock_agent
+        with patch("ai_council_review.llm.graph.run_security_agent") as mock_run:
+            mock_run.return_value = []
 
             security_node(state, config, mock_tracker)
 
-            assert mock_agent.cost_tracker is mock_tracker
-            mock_agent.run.assert_called_once_with(state)
+            assert mock_run.call_count == 1
+            call_args = mock_run.call_args
+            assert call_args.args[0] == state
+            assert call_args.args[1] == config
+            assert call_args.args[2] is None
+            assert "callbacks" in call_args.kwargs
+            assert len(call_args.kwargs["callbacks"]) == 1
+            assert isinstance(call_args.kwargs["callbacks"][0], CostCallbackHandler)

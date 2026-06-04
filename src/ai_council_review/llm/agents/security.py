@@ -2,132 +2,128 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import structlog
-from langchain_core.tools import BaseTool
+from langchain.agents import AgentExecutor, create_tool_calling_agent
 
+from ai_council_review.config import AgentConfig, CouncilConfig
 from ai_council_review.github.browser import RepositoryBrowser
-from ai_council_review.llm.agents.base import BaseAgent
 from ai_council_review.llm.prompts.loader import load_prompt
-from ai_council_review.models import ReviewState
+from ai_council_review.llm.providers.factory import LLMProviderFactory
+from ai_council_review.models import Finding, ReviewState
+from ai_council_review.tools.repository import make_repository_tools
 
 logger = structlog.get_logger()
 
 
-class SecurityAgent(BaseAgent):
-    """Security-focused agent that reviews for vulnerabilities and risky patterns."""
+def _build_agent_variables(state: ReviewState) -> dict[str, Any]:
+    """Build prompt variables from review state.
 
-    def __init__(self, config: Any, browser: RepositoryBrowser | None = None) -> None:
-        """Initialize the security agent.
+    Args:
+        state: Current review state.
 
-        Args:
-            config: CouncilConfig instance.
-            browser: RepositoryBrowser for cross-file awareness.
-        """
-        super().__init__("security", config)
-        self.browser = browser
+    Returns:
+        Dict of prompt template variables.
+    """
+    changed_files = state.changed_files
+    file_list = "\n".join(
+        f"- {f.filename} ({f.status}, +{f.additions}/-{f.deletions})" for f in changed_files
+    )
 
-    def get_tools(self) -> list[BaseTool]:
-        """Return tools available to the security agent.
+    diff_parts: list[str] = []
+    for f in changed_files:
+        if f.patch:
+            diff_parts.append(f"=== {f.filename} ===\n{f.patch}")
+    diff_text = "\n\n".join(diff_parts)
 
-        Returns:
-            List of tools. Includes file_read tool for checking auth configs,
-            dependency files, and related security files.
-        """
-        tools: list[BaseTool] = []
+    pr = state.pr_metadata
+    pr_title = pr.title if pr else ""
+    pr_number = pr.number if pr else 0
+    repo = pr.html_url if pr else ""
 
-        if self.browser is not None:
-            from langchain_core.tools import StructuredTool
-            from pydantic import BaseModel, Field
+    return {
+        "repo": repo,
+        "pr_number": pr_number,
+        "pr_title": pr_title,
+        "changed_files": file_list,
+        "diff": diff_text,
+    }
 
-            class ReadFileInput(BaseModel):
-                """Input for the read_file tool."""
 
-                path: str = Field(description="Path to the file to read")
-                ref: str = Field(default="HEAD", description="Git ref (branch, tag, or commit SHA)")
+def _parse_findings(text: str) -> list[Finding]:
+    """Parse findings from agent output string.
 
-            def read_file(path: str, ref: str = "HEAD") -> str:
-                """Read a file from the repository.
+    Args:
+        text: Raw agent output.
 
-                Args:
-                    path: File path relative to repo root.
-                    ref: Git ref.
+    Returns:
+        List of parsed findings. Empty list on failure.
+    """
+    try:
+        data = json.loads(text)
+        if isinstance(data, list):
+            return [Finding(**item) for item in data if isinstance(item, dict)]
+    except Exception:
+        pass
+    return []
 
-                Returns:
-                    File contents or error message.
-                """
-                if self.browser is None:
-                    return "Browser not available"
-                result = self.browser.get_file(path, ref)
-                if result is None:
-                    return f"File not found: {path} at {ref}"
-                return result
 
-            tools.append(
-                StructuredTool.from_function(
-                    name="read_file",
-                    func=read_file,
-                    description="Read a file from the repository. Use this to check auth configs, dependency files, security policies, or related security-sensitive files.",
-                    args_schema=ReadFileInput,
-                )
-            )
+def build_security_executor(
+    config: CouncilConfig,
+    browser: RepositoryBrowser | None,
+) -> AgentExecutor:
+    """Build an AgentExecutor for the security agent.
 
-        return tools
+    Args:
+        config: Global council configuration.
+        browser: Repository browser for cross-file awareness.
 
-    def get_prompt(self, state: ReviewState) -> str:
-        """Render the security prompt.
+    Returns:
+        Configured AgentExecutor.
+    """
+    agent_config = config.agents.get("security", AgentConfig())
+    llm = LLMProviderFactory.from_config(agent_config, config.providers)
+    tools = make_repository_tools(browser)
+    prompt = load_prompt("security")
 
-        Args:
-            state: Current review state.
+    agent = create_tool_calling_agent(llm, tools, prompt)
+    return AgentExecutor(
+        agent=agent,  # type: ignore[arg-type]
+        tools=tools,
+        max_execution_time=config.agent_timeout_seconds,
+        max_iterations=10,
+    )
 
-        Returns:
-            Rendered prompt text.
-        """
-        changed_files = state.changed_files
-        file_list = "\n".join(
-            f"- {f.filename} ({f.status}, +{f.additions}/-{f.deletions})" for f in changed_files
-        )
 
-        # Build diff text
-        diff_parts: list[str] = []
-        for f in changed_files:
-            if f.patch:
-                diff_parts.append(f"=== {f.filename} ===\n{f.patch}")
-        diff_text = "\n\n".join(diff_parts)
+def run_security_agent(
+    state: ReviewState,
+    config: CouncilConfig,
+    browser: RepositoryBrowser | None,
+    callbacks: list[Any] | None = None,
+) -> list[Finding]:
+    """Run the security agent and return findings.
 
-        pr = state.pr_metadata
-        pr_title = pr.title if pr else ""
-        pr_number = pr.number if pr else 0
-        repo = pr.html_url if pr else ""
+    Args:
+        state: Current review state.
+        config: Council configuration.
+        browser: Repository browser.
+        callbacks: Optional LangChain callbacks (e.g., CostCallbackHandler).
 
-        return load_prompt(
-            "security",
-            repo=repo,
-            pr_number=pr_number,
-            pr_title=pr_title,
-            changed_files=file_list,
-            diff=diff_text,
-        )
+    Returns:
+        List of findings.
+    """
+    logger.info("Security agent starting")
+    executor = build_security_executor(config, browser)
 
-    def run(self, state: ReviewState) -> Any:
-        """Run the security agent.
-
-        Args:
-            state: Current review state.
-
-        Returns:
-            List of findings.
-        """
-        logger.info("Security agent starting")
-        prompt = self.get_prompt(state)
-        tools = self.get_tools()
-
-        try:
-            model = self.llm.bind_tools(tools) if tools else self.llm
-            response = model.invoke(prompt)
-            text = str(response.content)
-            return self._parse_findings(text)
-        except Exception as e:
-            logger.error("Security agent failed", error=str(e))
-            return []
+    try:
+        variables = _build_agent_variables(state)
+        run_config = {"callbacks": callbacks} if callbacks else None
+        result = executor.invoke(variables, config=run_config)  # type: ignore[arg-type]
+        findings = _parse_findings(result["output"])
+        logger.info("Security agent finished", findings=len(findings))
+        return findings
+    except Exception as e:
+        logger.error("Security agent failed", error=str(e))
+        return []

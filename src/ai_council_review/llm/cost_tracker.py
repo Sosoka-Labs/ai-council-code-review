@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import structlog
+from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.outputs import LLMResult
 
 from ai_council_review.config import CouncilConfig
 from ai_council_review.exceptions import BudgetExceededError
@@ -166,3 +170,97 @@ class CostTracker:
             "budget_usd": self.config.budget_usd,
             "remaining_usd": max(0.0, self.config.budget_usd - self.total_cost_usd),
         }
+
+
+class CostCallbackHandler(BaseCallbackHandler):
+    """LangChain callback handler that records LLM costs via a CostTracker.
+
+    Attach this handler to any LangChain chain or agent executor::
+
+        tracker = CostTracker(config)
+        handler = CostCallbackHandler(tracker, agent_name="security", model_name="gpt-4o")
+        result = chain.invoke(input, config={"callbacks": [handler]})
+    """
+
+    def __init__(
+        self,
+        cost_tracker: CostTracker,
+        agent_name: str,
+        model_name: str,
+        max_tokens: int = 4000,
+    ) -> None:
+        """Initialize the handler.
+
+        Args:
+            cost_tracker: CostTracker instance for recording and budget checks.
+            agent_name: Identifier for the agent making the LLM call.
+            model_name: Model identifier for pricing lookup.
+            max_tokens: Maximum expected output tokens.
+        """
+        super().__init__()
+        self.cost_tracker = cost_tracker
+        self.agent_name = agent_name
+        self.model_name = model_name
+        self.max_tokens = max_tokens
+        self._estimated_cost = 0.0
+
+    def on_llm_start(
+        self,
+        serialized: dict[str, Any] | None,
+        prompts: list[str],
+        **kwargs: Any,
+    ) -> None:
+        """Estimate cost before the LLM call and check budget."""
+        prompt_text = "\n".join(prompts)
+        self._estimated_cost = self.cost_tracker.estimate_cost(
+            self.agent_name,
+            self.model_name,
+            prompt_text,
+            self.max_tokens,
+        )
+        self.cost_tracker.check_budget(self._estimated_cost)
+
+    def on_llm_end(self, response: LLMResult, **kwargs: Any) -> None:
+        """Record actual cost after the LLM call."""
+        actual_input: int | None = None
+        actual_output: int | None = None
+
+        # Extract usage from the first generation's message
+        if response.generations:
+            first_gen = response.generations[0][0]
+            message = getattr(first_gen, "message", None)
+            if message is not None and hasattr(message, "usage_metadata"):
+                usage = message.usage_metadata
+                if isinstance(usage, dict):
+                    actual_input = usage.get("input_tokens") or usage.get("prompt_tokens")
+                    actual_output = usage.get("output_tokens") or usage.get("completion_tokens")
+
+        estimated_input = self.cost_tracker._estimate_tokens(
+            "\n".join(getattr(response, "prompts", []))
+        )
+
+        if actual_input is not None and actual_output is not None:
+            input_price, output_price = self.cost_tracker._get_pricing(self.model_name)
+            actual_cost = (
+                actual_input * input_price / 1_000_000 + actual_output * output_price / 1_000_000
+            )
+            record = CostRecord(
+                agent=self.agent_name,
+                model=self.model_name,
+                estimated_input_tokens=estimated_input,
+                estimated_output_tokens=self.max_tokens,
+                actual_input_tokens=actual_input,
+                actual_output_tokens=actual_output,
+                estimated_cost_usd=actual_cost,
+            )
+        else:
+            record = CostRecord(
+                agent=self.agent_name,
+                model=self.model_name,
+                estimated_input_tokens=estimated_input,
+                estimated_output_tokens=self.max_tokens,
+                estimated_cost_usd=self._estimated_cost,
+            )
+
+        self.cost_tracker.record_cost(record)
+        self._estimated_cost = 0.0

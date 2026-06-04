@@ -2,32 +2,33 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any
+from langchain_core.prompts import ChatPromptTemplate
 
-import jinja2
+from ai_council_review.llm.prompts import templates
+
+_REGISTRY: dict[str, ChatPromptTemplate] = {
+    "router": templates.ROUTER,
+    "quality": templates.QUALITY,
+    "security": templates.SECURITY,
+    "generalist": templates.GENERALIST,
+    "synthesis": templates.SYNTHESIS,
+    "architecture": templates.ARCHITECTURE,
+}
 
 
-def load_prompt(name: str, **variables: Any) -> str:
-    """Load a prompt template from the prompts directory.
+def load_prompt(name: str) -> ChatPromptTemplate:
+    """Load a chat prompt template by name.
 
     Args:
-        name: Prompt name (e.g., "generalist"). The file `prompts/{name}.txt`
-            will be loaded.
-        **variables: Jinja2 template variables for substitution.
+        name: Prompt name (e.g., ``"generalist"``).
 
     Returns:
-        The rendered prompt text.
+        A :class:`~langchain_core.prompts.ChatPromptTemplate` configured
+        with Jinja2 formatting.
 
     Raises:
-        FileNotFoundError: If the prompt file does not exist.
+        KeyError: If the prompt name is not registered.
     """
-    prompts_dir = Path(__file__).parent
-    prompt_file = prompts_dir / f"{name}.txt"
-
-    if not prompt_file.exists():
-        raise FileNotFoundError(f"Prompt file not found: {prompt_file}")
-
-    template_text = prompt_file.read_text(encoding="utf-8")
-    template = jinja2.Template(template_text)
-    return template.render(**variables)
+    if name not in _REGISTRY:
+        raise KeyError(f"Prompt not found: {name}")
+    return _REGISTRY[name]

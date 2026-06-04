@@ -2,25 +2,23 @@
 
 from __future__ import annotations
 
-import concurrent.futures
 import os
 from typing import Any
 
 import structlog
 from langgraph.graph import END, StateGraph
 
-from ai_council_review.config import CouncilConfig
+from ai_council_review.config import AgentConfig, CouncilConfig
 from ai_council_review.github.browser import RepositoryBrowser
 from ai_council_review.github.client import GitHubClient
 from ai_council_review.github.ingestor import PRIngestor
 from ai_council_review.github.publisher import Publisher
-from ai_council_review.llm.agents.architecture import ArchitectureAgent
-from ai_council_review.llm.agents.base import BaseAgent
-from ai_council_review.llm.agents.quality import QualityAgent
-from ai_council_review.llm.agents.router import RouterAgent
-from ai_council_review.llm.agents.security import SecurityAgent
-from ai_council_review.llm.agents.synthesis import SynthesisAgent
-from ai_council_review.llm.cost_tracker import CostTracker
+from ai_council_review.llm.agents.architecture import run_architecture_agent
+from ai_council_review.llm.agents.quality import run_quality_agent
+from ai_council_review.llm.agents.router import run_router_agent
+from ai_council_review.llm.agents.security import run_security_agent
+from ai_council_review.llm.agents.synthesis import run_synthesis_agent
+from ai_council_review.llm.cost_tracker import CostCallbackHandler, CostTracker
 from ai_council_review.models import FileInfo, Finding, ReviewComment, ReviewState
 
 logger = structlog.get_logger()
@@ -103,8 +101,7 @@ def router_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
         logger.info("No files to review")
         return {}
 
-    router = RouterAgent(config)
-    result = router.run(state)
+    result = run_router_agent(state, config)
 
     logger.info(
         "Router complete",
@@ -118,48 +115,31 @@ def router_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
     }
 
 
-def _timed_agent_run(
-    agent: BaseAgent,
-    state: ReviewState,
-    timeout: int,
-) -> dict[str, Any]:
-    """Run an agent with a timeout and graceful degradation.
+def _make_cost_callback(
+    cost_tracker: CostTracker | None,
+    agent_name: str,
+    config: CouncilConfig,
+) -> list[Any] | None:
+    """Create a CostCallbackHandler if a tracker is available.
 
     Args:
-        agent: The agent to run.
-        state: Current review state.
-        timeout: Timeout in seconds.
+        cost_tracker: CostTracker instance.
+        agent_name: Agent identifier.
+        config: Council configuration.
 
     Returns:
-        State updates with agent outputs or empty findings on failure.
+        List containing the handler, or None.
     """
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(agent.run, state)
-        try:
-            findings = future.result(timeout=timeout)
-            return {
-                "agent_outputs": {agent.name: findings},
-            }
-        except concurrent.futures.TimeoutError:
-            logger.warning(
-                "Agent timed out",
-                agent=agent.name,
-                timeout=timeout,
-            )
-            return {
-                "agent_outputs": {agent.name: []},
-                "errors": {agent.name: f"Timed out after {timeout}s"},
-            }
-        except Exception as e:
-            logger.warning(
-                "Agent failed",
-                agent=agent.name,
-                error=str(e),
-            )
-            return {
-                "agent_outputs": {agent.name: []},
-                "errors": {agent.name: f"Failed: {str(e)}"},
-            }
+    if cost_tracker is None:
+        return None
+    agent_config = config.agents.get(agent_name, AgentConfig())
+    handler = CostCallbackHandler(
+        cost_tracker=cost_tracker,
+        agent_name=agent_name,
+        model_name=agent_config.model_name,
+        max_tokens=agent_config.max_tokens,
+    )
+    return [handler]
 
 
 def security_node(
@@ -181,9 +161,11 @@ def security_node(
         return {}
 
     browser = _get_browser()
-    agent = SecurityAgent(config, browser=browser)
-    agent.cost_tracker = cost_tracker
-    return _timed_agent_run(agent, state, config.agent_timeout_seconds)
+    callbacks = _make_cost_callback(cost_tracker, "security", config)
+    findings = run_security_agent(state, config, browser, callbacks=callbacks)
+    return {
+        "agent_outputs": {"security": findings},
+    }
 
 
 def quality_node(
@@ -205,9 +187,11 @@ def quality_node(
         return {}
 
     browser = _get_browser()
-    agent = QualityAgent(config, browser=browser)
-    agent.cost_tracker = cost_tracker
-    return _timed_agent_run(agent, state, config.agent_timeout_seconds)
+    callbacks = _make_cost_callback(cost_tracker, "quality", config)
+    findings = run_quality_agent(state, config, browser, callbacks=callbacks)
+    return {
+        "agent_outputs": {"quality": findings},
+    }
 
 
 def architecture_node(
@@ -229,9 +213,11 @@ def architecture_node(
         return {}
 
     browser = _get_browser()
-    agent = ArchitectureAgent(config, browser=browser)
-    agent.cost_tracker = cost_tracker
-    return _timed_agent_run(agent, state, config.agent_timeout_seconds)
+    callbacks = _make_cost_callback(cost_tracker, "architecture", config)
+    findings = run_architecture_agent(state, config, browser, callbacks=callbacks)
+    return {
+        "agent_outputs": {"architecture": findings},
+    }
 
 
 def synthesis_node(
@@ -258,8 +244,8 @@ def synthesis_node(
         logger.info("No agent outputs to synthesize")
         return {}
 
-    agent = SynthesisAgent(config)
-    result = agent.run(state)
+    callbacks = _make_cost_callback(cost_tracker, "synthesis", config)
+    result = run_synthesis_agent(state, config, callbacks=callbacks)
 
     return {
         "summary": result.summary,
@@ -415,7 +401,7 @@ def build_graph(config: CouncilConfig) -> Any:
     workflow.add_node("security", lambda state: security_node(state, config, cost_tracker))
     workflow.add_node("quality", lambda state: quality_node(state, config, cost_tracker))
     workflow.add_node("architecture", lambda state: architecture_node(state, config, cost_tracker))
-    workflow.add_node("synthesis", lambda state: synthesis_node(state, config, cost_tracker))
+    workflow.add_node("synthesis_agent", lambda state: synthesis_node(state, config, cost_tracker))
     workflow.add_node("post", lambda state: post_node(state, config))
 
     # Edges
@@ -423,21 +409,21 @@ def build_graph(config: CouncilConfig) -> Any:
     workflow.add_edge("ingest", "router")
 
     # Conditional routing from router
-    # LangGraph doesn't support dynamic conditional edges easily in v0.0.x,
-    # so we'll run all agents in parallel and let them skip if not needed.
-    # In v0.1.x, we could use Send() for conditional routing.
-    # For now: router -> all agents in parallel
-    workflow.add_edge("router", "security")
-    workflow.add_edge("router", "quality")
-    workflow.add_edge("router", "architecture")
+    # Run all agents in parallel. In the future, we could use Send() for
+    # dynamic conditional routing based on the router output.
+    workflow.add_conditional_edges(
+        "router",
+        lambda state: ["security", "quality", "architecture"],  # type: ignore[arg-type]
+        ["security", "quality", "architecture"],
+    )
 
     # Parallel agents converge to synthesis
-    workflow.add_edge("security", "synthesis")
-    workflow.add_edge("quality", "synthesis")
-    workflow.add_edge("architecture", "synthesis")
+    workflow.add_edge("security", "synthesis_agent")
+    workflow.add_edge("quality", "synthesis_agent")
+    workflow.add_edge("architecture", "synthesis_agent")
 
     # Synthesis -> post
-    workflow.add_edge("synthesis", "post")
+    workflow.add_edge("synthesis_agent", "post")
     workflow.add_edge("post", END)
 
     return workflow.compile()

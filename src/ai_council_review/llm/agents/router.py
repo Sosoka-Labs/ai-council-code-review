@@ -7,6 +7,7 @@ from typing import Any, cast
 import structlog
 from pydantic import BaseModel
 
+from ai_council_review.config import AgentConfig, CouncilConfig
 from ai_council_review.llm.prompts.loader import load_prompt
 from ai_council_review.llm.providers.factory import LLMProviderFactory
 from ai_council_review.models import ReviewState
@@ -22,96 +23,99 @@ class RouterOutput(BaseModel):
     reasoning: str
 
 
-class RouterAgent:
-    """Analyzes the PR and decides which agents to invoke."""
+def _build_router_variables(state: ReviewState) -> dict[str, Any]:
+    """Build prompt variables for the router agent.
 
-    def __init__(self, config: Any) -> None:
-        """Initialize the router.
+    Args:
+        state: Current review state.
 
-        Args:
-            config: CouncilConfig instance.
-        """
-        self.config = config
-        self.agent_config = config.agents.get("router", None)
-        if self.agent_config is None:
-            # Default router config
-            from ai_council_review.config import AgentConfig
+    Returns:
+        Dict of prompt template variables.
+    """
+    changed_files = state.changed_files
+    file_list = "\n".join(
+        f"- {f.filename} ({f.status}, +{f.additions}/-{f.deletions})" for f in changed_files
+    )
 
-            self.agent_config = AgentConfig(
-                enabled=True,
-                model="fireworks",
-                model_name="accounts/fireworks/models/llama-v3p1-70b-instruct",
-                temperature=0.1,
-                max_tokens=2000,
-            )
-        self._llm: Any | None = None
+    diff_parts: list[str] = []
+    for f in changed_files:
+        if f.patch:
+            diff_parts.append(f"=== {f.filename} ===\n{f.patch}")
+    diff_text = "\n\n".join(diff_parts)
 
-    @property
-    def llm(self) -> Any:
-        """Lazy-load the LLM instance.
+    pr = state.pr_metadata
+    pr_title = pr.title if pr else ""
+    pr_body = pr.body if pr else ""
+    pr_number = pr.number if pr else 0
+    repo = pr.html_url if pr else ""
 
-        Returns:
-            Configured LLM.
-        """
-        if self._llm is None:
-            self._llm = LLMProviderFactory.from_config(self.agent_config, self.config.providers)
-        return self._llm
+    return {
+        "repo": repo,
+        "pr_number": pr_number,
+        "pr_title": pr_title,
+        "pr_body": pr_body or "",
+        "changed_files": file_list,
+        "diff": diff_text,
+    }
 
-    def run(self, state: ReviewState) -> RouterOutput:
-        """Run the router and determine which agents are needed.
 
-        Args:
-            state: Current review state.
+def build_router_chain(config: CouncilConfig) -> Any:
+    """Build an LCEL chain for the router agent.
 
-        Returns:
-            RouterOutput with agents_needed, review_depth, and reasoning.
-        """
-        logger.info("Router agent starting")
+    Args:
+        config: Global council configuration.
 
-        changed_files = state.changed_files
-        file_list = "\n".join(
-            f"- {f.filename} ({f.status}, +{f.additions}/-{f.deletions})" for f in changed_files
+    Returns:
+        Runnable chain that outputs RouterOutput.
+    """
+    agent_config = config.agents.get("router", None)
+    if agent_config is None:
+        agent_config = AgentConfig(
+            enabled=True,
+            model="fireworks",
+            model_name="accounts/fireworks/models/llama-v3p1-70b-instruct",
+            temperature=0.1,
+            max_tokens=2000,
         )
 
-        # Build diff text
-        diff_parts: list[str] = []
-        for f in changed_files:
-            if f.patch:
-                diff_parts.append(f"=== {f.filename} ===\n{f.patch}")
-        diff_text = "\n\n".join(diff_parts)
+    llm = LLMProviderFactory.from_config(agent_config, config.providers)
+    prompt = load_prompt("router")
+    return prompt | llm.with_structured_output(RouterOutput)
 
-        pr = state.pr_metadata
-        pr_title = pr.title if pr else ""
-        pr_body = pr.body if pr else ""
-        pr_number = pr.number if pr else 0
-        repo = pr.html_url if pr else ""
 
-        prompt = load_prompt(
-            "router",
-            repo=repo,
-            pr_number=pr_number,
-            pr_title=pr_title,
-            pr_body=pr_body or "",
-            changed_files=file_list,
-            diff=diff_text,
+def run_router_agent(
+    state: ReviewState,
+    config: CouncilConfig,
+    callbacks: list[Any] | None = None,
+) -> RouterOutput:
+    """Run the router agent and determine which agents are needed.
+
+    Args:
+        state: Current review state.
+        config: Council configuration.
+        callbacks: Optional LangChain callbacks (e.g., CostCallbackHandler).
+
+    Returns:
+        RouterOutput with agents_needed, review_depth, and reasoning.
+    """
+    logger.info("Router agent starting")
+    chain = build_router_chain(config)
+
+    try:
+        variables = _build_router_variables(state)
+        run_config = {"callbacks": callbacks} if callbacks else None
+        result = chain.invoke(variables, config=run_config)
+        router_output = cast(RouterOutput, result)
+        logger.info(
+            "Router complete",
+            agents=router_output.agents_needed,
+            depth=router_output.review_depth,
         )
-
-        try:
-            # Use structured output for reliable JSON parsing
-            structured_model = self.llm.with_structured_output(RouterOutput)
-            result = structured_model.invoke(prompt)
-            router_output = cast(RouterOutput, result)
-            logger.info(
-                "Router complete",
-                agents=router_output.agents_needed,
-                depth=router_output.review_depth,
-            )
-            return router_output
-        except Exception as e:
-            logger.error("Router failed", error=str(e))
-            # Fallback: return all agents
-            return RouterOutput(
-                agents_needed=["security", "quality", "architecture"],
-                review_depth="standard",
-                reasoning=f"Router failed ({e}), defaulting to all agents",
-            )
+        return router_output
+    except Exception as e:
+        logger.error("Router failed", error=str(e))
+        return RouterOutput(
+            agents_needed=["security", "quality", "architecture"],
+            review_depth="standard",
+            reasoning=f"Router failed ({e}), defaulting to all agents",
+        )

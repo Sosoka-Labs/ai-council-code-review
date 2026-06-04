@@ -142,7 +142,7 @@ class TestRouterNode:
     """Tests for router_node."""
 
     def test_router_node(self) -> None:
-        """Mock RouterAgent and verify agents_needed is set."""
+        """Mock run_router_agent and verify agents_needed is set."""
         config = CouncilConfig()
         state = ReviewState(
             pr_metadata=PRMetadata(
@@ -163,23 +163,21 @@ class TestRouterNode:
         mock_output.agents_needed = ["security", "quality"]
         mock_output.review_depth = "deep"
 
-        with patch("ai_council_review.llm.graph.RouterAgent") as mock_router:
-            mock_instance = MagicMock()
-            mock_instance.run.return_value = mock_output
-            mock_router.return_value = mock_instance
+        with patch("ai_council_review.llm.graph.run_router_agent") as mock_router:
+            mock_router.return_value = mock_output
 
             result = router_node(state, config)
 
         assert result["agents_needed"] == ["security", "quality"]
         assert result["review_depth"] == "deep"
-        mock_instance.run.assert_called_once_with(state)
+        mock_router.assert_called_once_with(state, config)
 
     def test_router_node_skipped(self) -> None:
         """Skipped state returns empty updates."""
         config = CouncilConfig()
         state = ReviewState(skipped=True)
 
-        with patch("ai_council_review.llm.graph.RouterAgent") as mock_router:
+        with patch("ai_council_review.llm.graph.run_router_agent") as mock_router:
             result = router_node(state, config)
 
         assert result == {}
@@ -203,7 +201,7 @@ class TestRouterNode:
             changed_files=[],
         )
 
-        with patch("ai_council_review.llm.graph.RouterAgent") as mock_router:
+        with patch("ai_council_review.llm.graph.run_router_agent") as mock_router:
             result = router_node(state, config)
 
         assert result == {}
