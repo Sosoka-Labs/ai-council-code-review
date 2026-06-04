@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, cast
 
 import structlog
 from langchain.agents import AgentExecutor, create_tool_calling_agent
@@ -88,9 +88,9 @@ def build_architecture_executor(
     tools = make_repository_tools(browser)
     prompt = load_prompt("architecture")
 
-    agent = create_tool_calling_agent(llm, tools, prompt)
+    agent = cast(Any, create_tool_calling_agent(llm, tools, prompt))
     return AgentExecutor(
-        agent=agent,  # type: ignore[arg-type]
+        agent=agent,
         tools=tools,
         max_execution_time=config.agent_timeout_seconds,
         max_iterations=10,
