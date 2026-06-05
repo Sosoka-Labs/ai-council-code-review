@@ -195,8 +195,8 @@ Brief description of what this PR does.
 
 - All source code lives in `src/ai_council_review/`
 - One concept per module — keep modules small and focused
-- Agents live in `src/ai_council_review/agents/`
-- Prompts are `.txt` files in `src/ai_council_review/prompts/` (not inline strings)
+- Agents live in `src/ai_council_review/llm/agents/`
+- Prompts are `ChatPromptTemplate` constants in `src/ai_council_review/llm/prompts/templates.py` (not inline strings)
 - Tests mirror the source structure under `tests/`
 - No business logic in `__main__.py` — keep entry points thin
 
@@ -340,14 +340,15 @@ Load with `python-dotenv` in test scripts.
 
 ### 10.1 Adding a New Agent
 
-1. Create `src/ai_council_review/agents/<agent_name>.py`
-2. Inherit from `BaseAgent` (see `agents/base.py`)
-3. Add prompt template to `src/ai_council_review/prompts/<agent_name>.txt`
-4. Add agent config to `config.py` (Pydantic model)
-5. Add agent to the default config YAML
-6. Register agent in `graph.py`
-7. Add tests in `tests/test_agents/test_<agent_name>.py`
-8. Update `reference.md` agent documentation
+1. Create `src/ai_council_review/llm/agents/<agent_name>.py`
+2. Export `build_<agent_name>_executor(config, browser) -> AgentExecutor` (for tool agents) or `build_<agent_name>_chain(config) -> Runnable` (for single-shot agents)
+3. Export `run_<agent_name>_agent(state, config, ...) -> list[Finding]`
+4. Add prompt template to `src/ai_council_review/llm/prompts/templates.py` (use `ChatPromptTemplate` with `MessagesPlaceholder` for tool agents)
+5. Add agent config to `config.py` (Pydantic model)
+6. Add agent to the default config YAML
+7. Register agent in `graph.py`
+8. Add tests in `tests/test_agents/test_<agent_name>.py`
+9. Update `reference.md` agent documentation
 
 ### 10.2 Adding a New LLM Provider
 

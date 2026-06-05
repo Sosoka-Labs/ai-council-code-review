@@ -12,11 +12,11 @@ from typing import Any, cast
 import structlog
 
 from ai_council_review.config import load_config
-from ai_council_review.debug import dump_state
-from ai_council_review.github_client import GitHubClient
-from ai_council_review.graph import build_graph
+from ai_council_review.github.client import GitHubClient
+from ai_council_review.github.ingestor import PRIngestor
+from ai_council_review.llm.graph import build_graph
 from ai_council_review.models import FileInfo, ReviewState
-from ai_council_review.pr_ingestor import PRIngestor
+from ai_council_review.utils.debug import dump_state
 
 logger = structlog.get_logger()
 
