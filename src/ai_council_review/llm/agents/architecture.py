@@ -103,7 +103,7 @@ def run_architecture_agent(
         variables = _build_agent_variables(state)
         run_config = {"callbacks": callbacks} if callbacks else None
         result = executor.invoke(variables, config=run_config)  # type: ignore[arg-type]
-        findings = parse_findings(result["output"], agent_name="architecture")
+        findings = parse_findings(result["output"], agent_name="architecture", logger=logger)
         logger.info("Architecture agent finished", findings=len(findings))
         if not findings:
             logger.info("Architecture agent raw output", raw_output=result["output"])

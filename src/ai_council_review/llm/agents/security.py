@@ -103,7 +103,7 @@ def run_security_agent(
         variables = _build_agent_variables(state)
         run_config = {"callbacks": callbacks} if callbacks else None
         result = executor.invoke(variables, config=run_config)  # type: ignore[arg-type]
-        findings = parse_findings(result["output"], agent_name="security")
+        findings = parse_findings(result["output"], agent_name="security", logger=logger)
         logger.info("Security agent finished", findings=len(findings))
         if not findings:
             logger.info("Security agent raw output", raw_output=result["output"])

@@ -103,7 +103,7 @@ def run_quality_agent(
         variables = _build_agent_variables(state)
         run_config = {"callbacks": callbacks} if callbacks else None
         result = executor.invoke(variables, config=run_config)  # type: ignore[arg-type]
-        findings = parse_findings(result["output"], agent_name="quality")
+        findings = parse_findings(result["output"], agent_name="quality", logger=logger)
         logger.info("Quality agent finished", findings=len(findings))
         if not findings:
             logger.info("Quality agent raw output", raw_output=result["output"])

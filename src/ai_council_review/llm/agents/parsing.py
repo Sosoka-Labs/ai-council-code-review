@@ -6,7 +6,11 @@ import json
 import re
 from typing import Any
 
+import structlog
+
 from ai_council_review.models import Finding
+
+logger = structlog.get_logger()
 
 
 def _normalize_finding(item: dict[str, Any]) -> dict[str, Any]:
@@ -60,7 +64,7 @@ def _normalize_finding(item: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-def parse_findings(text: str, agent_name: str | None = None) -> list[Finding]:
+def parse_findings(text: str, agent_name: str | None = None, logger: Any = None) -> list[Finding]:
     """Parse findings from agent output string.
 
     Handles markdown code blocks, extra text, and extracts JSON arrays.
@@ -69,6 +73,7 @@ def parse_findings(text: str, agent_name: str | None = None) -> list[Finding]:
     Args:
         text: Raw agent output.
         agent_name: Optional agent name to tag each finding with.
+        logger: Optional logger for debugging parse failures.
 
     Returns:
         List of parsed findings. Empty list on failure.
@@ -94,7 +99,11 @@ def parse_findings(text: str, agent_name: str | None = None) -> list[Finding]:
                     normalized = _normalize_finding(item)
                     if agent_name:
                         normalized["agent"] = agent_name
-                    findings.append(Finding(**normalized))
+                    try:
+                        findings.append(Finding(**normalized))
+                    except Exception as e:
+                        if logger:
+                            logger.warning("Failed to create Finding", error=str(e), item=item)
             return findings
     except Exception:
         pass
@@ -111,7 +120,11 @@ def parse_findings(text: str, agent_name: str | None = None) -> list[Finding]:
                         normalized = _normalize_finding(item)
                         if agent_name:
                             normalized["agent"] = agent_name
-                        findings.append(Finding(**normalized))
+                        try:
+                            findings.append(Finding(**normalized))
+                        except Exception as e:
+                            if logger:
+                                logger.warning("Failed to create Finding", error=str(e), item=item)
                 return findings
     except Exception:
         pass
