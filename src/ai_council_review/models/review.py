@@ -31,6 +31,7 @@ class Finding(BaseModel):
     body: str
     confidence: float = Field(ge=0.0, le=1.0, default=0.8)
     line: int | None = None
+    agent: str | None = None
 
 
 class CostRecord(BaseModel):

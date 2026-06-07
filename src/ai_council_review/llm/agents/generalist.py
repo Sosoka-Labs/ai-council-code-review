@@ -103,8 +103,10 @@ def run_generalist_agent(
         variables = _build_agent_variables(state)
         run_config = {"callbacks": callbacks} if callbacks else None
         result = executor.invoke(variables, config=run_config)  # type: ignore[arg-type]
-        findings = parse_findings(result["output"])
+        findings = parse_findings(result["output"], agent_name="generalist")
         logger.info("Generalist agent finished", findings=len(findings))
+        if not findings:
+            logger.debug("Generalist agent raw output", raw_output=result["output"])
         return findings
     except Exception as e:
         logger.error("Generalist agent failed", error=str(e))

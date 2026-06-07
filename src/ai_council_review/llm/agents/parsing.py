@@ -8,13 +8,14 @@ import re
 from ai_council_review.models import Finding
 
 
-def parse_findings(text: str) -> list[Finding]:
+def parse_findings(text: str, agent_name: str | None = None) -> list[Finding]:
     """Parse findings from agent output string.
 
     Handles markdown code blocks, extra text, and extracts JSON arrays.
 
     Args:
         text: Raw agent output.
+        agent_name: Optional agent name to tag each finding with.
 
     Returns:
         List of parsed findings. Empty list on failure.
@@ -36,7 +37,11 @@ def parse_findings(text: str) -> list[Finding]:
     try:
         data = json.loads(text)
         if isinstance(data, list):
-            return [Finding(**item) for item in data if isinstance(item, dict)]
+            findings = [Finding(**item) for item in data if isinstance(item, dict)]
+            if agent_name:
+                for f in findings:
+                    f.agent = agent_name
+            return findings
     except Exception:
         pass
 
@@ -47,7 +52,11 @@ def parse_findings(text: str) -> list[Finding]:
         if match:
             data = json.loads(match.group(0))
             if isinstance(data, list):
-                return [Finding(**item) for item in data if isinstance(item, dict)]
+                findings = [Finding(**item) for item in data if isinstance(item, dict)]
+                if agent_name:
+                    for f in findings:
+                        f.agent = agent_name
+                return findings
     except Exception:
         pass
 

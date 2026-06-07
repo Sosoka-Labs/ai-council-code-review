@@ -20,6 +20,7 @@ from ai_council_review.llm.agents.security import run_security_agent
 from ai_council_review.llm.agents.synthesis import run_synthesis_agent
 from ai_council_review.llm.cost_tracker import CostCallbackHandler, CostTracker
 from ai_council_review.models import FileInfo, Finding, ReviewComment, ReviewState
+from ai_council_review.utils.patch_parser import get_position_for_line
 
 logger = structlog.get_logger()
 
@@ -299,15 +300,45 @@ def post_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
             "verdict": "approve",
         }
 
+    # Build a patch lookup for position computation
+    patch_lookup: dict[str, str] = {}
+    for file in state.changed_files:
+        if file.patch:
+            patch_lookup[file.filename] = file.patch
+
     # Convert findings to ReviewComments
     comments: list[ReviewComment] = []
     for finding in all_findings:
-        if finding.position is not None:
+        position = finding.position
+        # If no position but line is available, compute from patch
+        if position is None and finding.line is not None:
+            patch = patch_lookup.get(finding.path)
+            if patch:
+                position = get_position_for_line(patch, finding.line)
+                if position is None:
+                    logger.warning(
+                        "Could not compute position for line",
+                        path=finding.path,
+                        line=finding.line,
+                    )
+
+        if position is not None:
+            # Build comment body with agent attribution
+            body_parts: list[str] = []
+            if finding.agent:
+                body_parts.append(f"**🤖 {finding.agent.capitalize()} Agent**")
+                body_parts.append("")
+            body_parts.append(finding.body)
+            if finding.confidence is not None:
+                body_parts.append("")
+                body_parts.append(f"_Confidence: {finding.confidence:.0%}_")
+            body = "\n".join(body_parts)
+
             comments.append(
                 ReviewComment(
                     path=finding.path,
-                    position=finding.position,
-                    body=finding.body,
+                    position=position,
+                    body=body,
                 )
             )
 
@@ -319,10 +350,13 @@ def post_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
     if not summary_text:
         summary_parts = ["## AI Code Review\n"]
         severity_counts: dict[str, int] = {}
+        agent_counts: dict[str, int] = {}
         for finding in all_findings:
             severity_counts[finding.severity.value] = (
                 severity_counts.get(finding.severity.value, 0) + 1
             )
+            agent_name = finding.agent or "unknown"
+            agent_counts[agent_name] = agent_counts.get(agent_name, 0) + 1
 
         summary_parts.append("\n**Findings by severity:**\n")
         for severity, count in sorted(
@@ -330,6 +364,10 @@ def post_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
             key=lambda x: {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}.get(x[0], 5),
         ):
             summary_parts.append(f"- {severity.capitalize()}: {count}")
+
+        summary_parts.append("\n**Findings by agent:**\n")
+        for agent_name, count in sorted(agent_counts.items()):
+            summary_parts.append(f"- {agent_name.capitalize()}: {count}")
 
         summary_parts.append(f"\n**Total findings:** {len(all_findings)}")
         summary_parts.append(
