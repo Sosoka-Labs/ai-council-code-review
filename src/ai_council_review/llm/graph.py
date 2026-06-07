@@ -308,6 +308,7 @@ def post_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
 
     # Convert findings to ReviewComments
     comments: list[ReviewComment] = []
+    skipped_findings: list[Finding] = []
     for finding in all_findings:
         position = finding.position
         # If no position but line is available, compute from patch
@@ -315,12 +316,6 @@ def post_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
             patch = patch_lookup.get(finding.path)
             if patch:
                 position = get_position_for_line(patch, finding.line)
-                if position is None:
-                    logger.warning(
-                        "Could not compute position for line",
-                        path=finding.path,
-                        line=finding.line,
-                    )
 
         if position is not None:
             # Build comment body with agent attribution
@@ -341,9 +336,19 @@ def post_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
                     body=body,
                 )
             )
+        else:
+            skipped_findings.append(finding)
+            logger.info(
+                "Skipping inline comment (no position)",
+                path=finding.path,
+                line=finding.line,
+            )
 
     # Validate comments against changed files
     comments = publisher.validate_comments(comments, state.changed_files)
+
+    if skipped_findings:
+        logger.info("Skipped inline comments", count=len(skipped_findings))
 
     # Build summary from synthesis if available
     summary_text: str = state.summary or ""

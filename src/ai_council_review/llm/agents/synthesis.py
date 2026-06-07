@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
-from typing import Any, cast
+from typing import Any
 
 import structlog
 from pydantic import BaseModel
@@ -65,6 +66,47 @@ def _build_synthesis_variables(state: ReviewState) -> dict[str, Any]:
     }
 
 
+def _parse_synthesis_output(text: str) -> SynthesisOutput | None:
+    """Parse synthesis output from LLM text.
+
+    Args:
+        text: Raw LLM output.
+
+    Returns:
+        SynthesisOutput if parsing succeeds, None otherwise.
+    """
+    if not text or not text.strip():
+        return None
+
+    text = text.strip()
+
+    # Strip markdown code blocks if present
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1] if "\n" in text else text
+        if text.rstrip().endswith("```"):
+            text = text.rstrip()[:-3].rstrip()
+
+    try:
+        data = json.loads(text)
+        if isinstance(data, dict):
+            findings_data = data.get("findings", [])
+            findings = []
+            for item in findings_data:
+                if isinstance(item, dict):
+                    with contextlib.suppress(Exception):
+                        findings.append(Finding(**item))
+            return SynthesisOutput(
+                summary=data.get("summary", ""),
+                verdict=data.get("verdict", "comment"),
+                findings=findings,
+                categories=data.get("categories", []),
+            )
+    except Exception:
+        pass
+
+    return None
+
+
 def build_synthesis_chain(config: CouncilConfig) -> Any:
     """Build an LCEL chain for the synthesis agent.
 
@@ -72,7 +114,7 @@ def build_synthesis_chain(config: CouncilConfig) -> Any:
         config: Global council configuration.
 
     Returns:
-        Runnable chain that outputs SynthesisOutput.
+        Runnable chain that outputs string (JSON).
     """
     agent_config = config.agents.get("synthesis", None)
     if agent_config is None:
@@ -86,7 +128,7 @@ def build_synthesis_chain(config: CouncilConfig) -> Any:
 
     llm = LLMProviderFactory.from_config(agent_config, config.providers)
     prompt = load_prompt("synthesis")
-    return prompt | llm.with_structured_output(SynthesisOutput)
+    return prompt | llm
 
 
 def _fallback_synthesize(all_findings: list[dict[str, Any]]) -> SynthesisOutput:
@@ -179,7 +221,15 @@ def run_synthesis_agent(
         variables = _build_synthesis_variables(state)
         run_config = {"callbacks": callbacks} if callbacks else None
         result = chain.invoke(variables, config=run_config)
-        synthesis_output = cast(SynthesisOutput, result)
+
+        # Extract text from result
+        text = result.content if hasattr(result, "content") else str(result)
+
+        synthesis_output = _parse_synthesis_output(text)
+        if synthesis_output is None:
+            logger.warning("Failed to parse synthesis output, using fallback")
+            raise ValueError("Failed to parse synthesis output")
+
         logger.info(
             "Synthesis complete",
             findings=len(synthesis_output.findings),
