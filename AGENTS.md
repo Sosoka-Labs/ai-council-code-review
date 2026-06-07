@@ -361,8 +361,10 @@ Load with `python-dotenv` in test scripts.
 
 ### 10.3 Adding a New Tool to RepositoryBrowser
 
-1. Add method to `RepositoryBrowser` class in `repository_browser.py`
-2. Add tool to agent's tool list in the agent's `get_tools()` method
+Repository browser tools live in `src/ai_council_review/llm/tools/` (LangChain `@tool` decorators bound to a `RepositoryBrowser` instance).
+
+1. Add the tool function to `src/ai_council_review/llm/tools/repository.py`
+2. Register it in `make_repository_tools()`
 3. Update tests in `tests/test_repository_browser.py`
 4. Update `reference.md` if behavior is user-facing
 

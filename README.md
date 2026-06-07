@@ -12,6 +12,7 @@ AI Council reviews every pull request with a team of specialist agents:
 |-----------|----------------------|
 | **Multi-agent council** | Router, Security, Quality, Architecture, and Synthesis agents each focus on their domain |
 | **Cross-file awareness** | Agents read `README.md`, tests, migrations, and dependencies to catch drift and impact |
+| **Agent-attributed comments** | Every inline comment is tagged with the agent name and confidence score |
 | **Cost-controlled** | Configurable per-PR budget ($5.00 default); skip on forks by default |
 | **Graceful degradation** | One agent failure does not crash the workflow; others continue |
 | **Multi-provider** | Fireworks.ai (default), OpenAI, and Anthropic are all first-class options |
@@ -56,9 +57,10 @@ jobs:
     if: github.event.pull_request.draft == false
 
     steps:
-      - name: Checkout PR branch
+      - name: Checkout PR HEAD
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
       - name: Fetch base branch

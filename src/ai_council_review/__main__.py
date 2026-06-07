@@ -136,6 +136,7 @@ def main() -> int:
 
         # Debug: log head_sha and actual git HEAD
         import subprocess
+
         try:
             git_head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
         except Exception:

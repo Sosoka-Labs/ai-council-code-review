@@ -783,36 +783,76 @@ ai-council-code-review/
 │       ├── config.py                  # Config loading & validation (Pydantic)
 │       ├── github_client.py           # GitHub API wrapper (PyGithub + REST)
 │       ├── pr_ingestor.py             # PR metadata & diff ingestion
-│       ├── repository_browser.py      # File reading tools (git + API)
-│       ├── graph.py                   # LangGraph state machine
-│       ├── publisher.py             # Post review comments to GitHub
-│       ├── models.py                  # Pydantic models for state, findings, comments
-│       ├── agents/
+│       ├── github/                    # GitHub API client, browser, ingestor, publisher
 │       │   ├── __init__.py
-│       │   ├── base.py                # Base agent class
-│       │   ├── router.py              # Router agent
-│       │   ├── security.py            # Security agent
-│       │   ├── quality.py             # Code quality agent
-│       │   ├── architecture.py        # Architecture agent
-│       │   └── synthesis.py           # Synthesis agent
-│       └── prompts/
-│           ├── router.txt
-│           ├── security.txt
-│           ├── quality.txt
-│           ├── architecture.txt
-│           └── synthesis.txt
+│       │   ├── client.py                # GitHub API wrapper (PyGithub + REST)
+│       │   ├── browser.py             # Repository browser (read-only filesystem)
+│       │   ├── ingestor.py            # PR metadata & diff ingestion
+│       │   └── publisher.py           # Post review comments to GitHub
+│       ├── llm/                       # LLM layer: agents, prompts, providers, tools
+│       │   ├── __init__.py
+│       │   ├── graph.py               # LangGraph state machine
+│       │   ├── agents/                # Agent implementations
+│       │   │   ├── __init__.py
+│       │   │   ├── parsing.py         # Agent output parsing utilities
+│       │   │   ├── router.py          # Router agent
+│       │   │   ├── security.py        # Security agent
+│       │   │   ├── quality.py         # Code quality agent
+│       │   │   ├── architecture.py    # Architecture agent
+│       │   │   ├── synthesis.py       # Synthesis agent
+│       │   │   └── generalist.py      # Generalist agent (single agent, all domains)
+│       │   ├── prompts/               # Prompt templates
+│       │   │   ├── __init__.py
+│       │   │   ├── loader.py          # Prompt loading from files
+│       │   │   └── templates.py       # ChatPromptTemplate constants
+│       │   ├── providers/             # LLM provider factory
+│       │   │   ├── __init__.py
+│       │   │   ├── factory.py         # LLMProviderFactory
+│       │   │   └── retry.py           # LLM retry wrapper
+│       │   └── tools/                 # LangChain tools for repository browsing
+│       │       ├── __init__.py
+│       │       └── repository.py      # read_file, list_files, find_files tools
+│       ├── models/                    # Pydantic models
+│       │   ├── __init__.py
+│       │   ├── enums.py               # Severity, Verdict, etc.
+│       │   ├── pr.py                  # PR metadata models
+│       │   ├── review.py              # Finding, ReviewComment, CostRecord
+│       │   └── state.py               # ReviewState, GraphState
+│       ├── utils/                     # Utilities
+│       │   ├── __init__.py
+│       │   ├── patch_parser.py        # Unified diff parsing
+│       │   └── debug.py               # Debug state dumping
+│       ├── config.py                  # Config loading & validation (Pydantic)
+│       ├── exceptions.py              # Custom exception hierarchy
+│       └── __main__.py                # Entry point: python -m ai_council_review
 ├── tests/
 │   ├── __init__.py
 │   ├── test_config.py
-│   ├── test_github_client.py
-│   ├── test_repository_browser.py
-│   ├── test_pr_ingestor.py
-│   ├── test_agents/
-│   │   ├── test_router.py
-│   │   ├── test_security.py
-│   │   ├── test_quality.py
-│   │   ├── test_architecture.py
-│   │   └── test_synthesis.py
+│   ├── test_github/                   # GitHub client, browser, ingestor, publisher tests
+│   │   ├── test_browser.py
+│   │   ├── test_client.py
+│   │   ├── test_client_retry.py
+│   │   ├── test_ingestor.py
+│   │   └── test_publisher.py
+│   ├── test_llm/                      # LLM layer tests
+│   │   ├── test_cost_tracker.py
+│   │   ├── test_graph.py
+│   │   ├── test_graph_hardening.py
+│   │   ├── test_prompts.py
+│   │   ├── test_providers/
+│   │   │   ├── test_llm_provider.py
+│   │   │   └── test_llm_provider_retry.py
+│   │   └── test_agents/
+│   │       ├── __init__.py
+│   │       └── (agent tests)
+│   ├── test_models/                   # Model tests
+│   │   ├── test_enums.py
+│   │   ├── test_pr.py
+│   │   ├── test_review.py
+│   │   └── test_state.py
+│   ├── test_utils/                    # Utility tests
+│   │   ├── test_debug.py
+│   │   └── test_patch_parser.py
 │   └── fixtures/
 │       ├── pr_payload.json
 │       ├── changed_files.json
@@ -841,7 +881,7 @@ ai-council-code-review/
 | **GitHub API rate limits** | Review fails mid-run | Track API calls; use local git for file reads; implement conservative mode |
 | **LLM API costs** | Expensive for large PRs | Hard PR size limits; configurable model selection (cheap for router); token tracking |
 | **LLM context overflow** | Truncated diffs, missed issues | Chunk files intelligently; prioritize changed lines; use file browser for context instead of dumping everything |
-| **Incorrect inline positions** | Comments appear on wrong lines | Rigorous patch parsing; unit tests with sample diffs; validate positions before posting |
+| **Incorrect inline positions** | Comments appear on wrong lines | Use `line` + `side` instead of deprecated `position`; validate against changed hunks before posting |
 | **Agent hallucinations** | False positives, noise | Synthesis agent deduplicates; configurable severity thresholds; clear "AI-generated" disclaimers |
 | **Security: secrets in PRs** | LLM sees API keys | Same risk as any code review; agents don't store or transmit code beyond the review context |
 | **Fork PRs** | `GITHUB_TOKEN` is read-only | **Skip by default** (`comment_on_forks: false`). Users can opt-in via config if they understand `pull_request_target` security trade-offs. |
