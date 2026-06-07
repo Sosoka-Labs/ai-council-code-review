@@ -30,10 +30,14 @@ def _normalize_finding(item: dict[str, Any]) -> dict[str, Any]:
     else:
         normalized["path"] = "unknown"
 
-    if "position" in item:
-        normalized["position"] = item["position"]
+    # Some LLMs return "position" when they mean a file line number; always
+    # treat it as "line" so downstream code can compute the diff position.
     if "line" in item:
         normalized["line"] = item["line"]
+    elif "position" in item:
+        normalized["line"] = item["position"]
+    # We intentionally do NOT set "position" here — the graph layer computes
+    # the correct diff position from the file line number and the patch.
 
     if "severity" in item:
         normalized["severity"] = str(item["severity"]).lower()

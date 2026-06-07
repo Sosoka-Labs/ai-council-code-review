@@ -307,9 +307,11 @@ def post_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
     comments: list[ReviewComment] = []
     skipped_findings: list[Finding] = []
     for finding in all_findings:
-        position = finding.position
-        # If no position but line is available, compute from patch
-        if position is None and finding.line is not None:
+        # Always compute position from line number; ignore any position
+        # the LLM may have returned (it is usually a file line number, not a
+        # diff position).
+        position: int | None = None
+        if finding.line is not None:
             patch = patch_lookup.get(finding.path)
             if patch:
                 position = get_position_for_line(patch, finding.line)
