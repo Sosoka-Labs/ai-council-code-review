@@ -70,8 +70,8 @@ def get_added_line_positions(patch: str) -> list[tuple[int, int, str]]:
     """Find positions of all added lines in a patch.
 
     The `position` is the 1-based index within the file's patch, counting
-    from the first @@ hunk header. This is the value GitHub expects for
-    review comment `position`.
+    from the first line after the first @@ hunk header. This is the value
+    GitHub expects for review comment `position`.
 
     Args:
         patch: The unified diff patch text.
@@ -82,26 +82,29 @@ def get_added_line_positions(patch: str) -> list[tuple[int, int, str]]:
     positions: list[tuple[int, int, str]] = []
     position = 0
     new_line = 0
+    in_hunk = False
 
     for line in patch.split("\n"):
         if line.startswith("@@"):
             match = HUNK_HEADER_RE.match(line)
             if match:
                 new_line = int(match.group(3))
-            position += 1  # The @@ line itself counts as position
-        elif line.startswith("+"):
-            position += 1
-            positions.append((position, new_line, line[1:]))
-            new_line += 1
-        elif line.startswith("-"):
-            position += 1
-            # Removed lines don't increment new_line
-        elif line.startswith(" "):
-            position += 1
-            new_line += 1
-        elif line.startswith("\\"):
-            # "No newline at end of file" marker
-            pass
+            in_hunk = True
+            # Do not increment position for @@ lines
+        elif in_hunk:
+            if line.startswith("+"):
+                position += 1
+                positions.append((position, new_line, line[1:]))
+                new_line += 1
+            elif line.startswith("-"):
+                position += 1
+                # Removed lines don't increment new_line
+            elif line.startswith(" "):
+                position += 1
+                new_line += 1
+            elif line.startswith("\\"):
+                # "No newline at end of file" marker
+                pass
 
     return positions
 

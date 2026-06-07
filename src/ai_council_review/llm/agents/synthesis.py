@@ -123,7 +123,7 @@ def build_synthesis_chain(config: CouncilConfig) -> Any:
             model="fireworks",
             model_name="accounts/fireworks/routers/kimi-k2p6-turbo",
             temperature=0.2,
-            max_tokens=4000,
+            max_tokens=16000,
         )
 
     llm = LLMProviderFactory.from_config(agent_config, config.providers)

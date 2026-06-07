@@ -65,21 +65,23 @@ class TestGetAddedLinePositions:
     """Tests for get_added_line_positions."""
 
     def test_added_positions(self) -> None:
-        """Test finding positions of added lines."""
+        """Test finding positions of added lines.
+
+        GitHub positions are 1-based from the first line after the first @@.
+        @@ lines themselves are not counted. Positions continue across hunks.
+        """
         positions = get_added_line_positions(SAMPLE_PATCH)
-        # Hunk 1: line 2 is added at position 3
-        # Hunk 2: line 12 is added at position 12, line 13 at position 13
         assert len(positions) == 3
 
-        # First hunk: @@=1, context=2, removed=3, added=4
+        # First hunk: context=1, removed=2, added=3
         # new_line starts at 1, context increments to 2, removed stays 2, added at 2
-        assert positions[0] == (4, 2, '    print("new")')
+        assert positions[0] == (3, 2, '    print("new")')
 
-        # Second hunk: @@=6, context=7, context=8, removed=9, added=10, added=11
+        # Second hunk: context=5, context=6, removed=7, added=8, added=9
         # new_line starts at 10, context increments to 11, context increments to 12,
         # removed stays 12, added at 12, added at 13
-        assert positions[1] == (10, 12, "    y = 3")
-        assert positions[2] == (11, 13, "    z = 4")
+        assert positions[1] == (8, 12, "    y = 3")
+        assert positions[2] == (9, 13, "    z = 4")
 
     def test_empty_patch(self) -> None:
         """Test with empty patch."""
@@ -93,10 +95,10 @@ class TestGetPositionForLine:
     def test_find_position(self) -> None:
         """Test getting position for a specific line."""
         pos = get_position_for_line(SAMPLE_PATCH, 2)
-        assert pos == 4
+        assert pos == 3
 
         pos = get_position_for_line(SAMPLE_PATCH, 12)
-        assert pos == 10
+        assert pos == 8
 
     def test_missing_line(self) -> None:
         """Test line not in patch."""
@@ -109,10 +111,10 @@ class TestGetLineForPosition:
 
     def test_find_line(self) -> None:
         """Test getting line number for a position."""
-        line = get_line_for_position(SAMPLE_PATCH, 4)
+        line = get_line_for_position(SAMPLE_PATCH, 3)
         assert line == 2
 
-        line = get_line_for_position(SAMPLE_PATCH, 10)
+        line = get_line_for_position(SAMPLE_PATCH, 8)
         assert line == 12
 
     def test_missing_position(self) -> None:
