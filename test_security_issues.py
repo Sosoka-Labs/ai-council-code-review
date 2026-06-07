@@ -5,8 +5,7 @@ This file contains deliberate security issues for the agents to find.
 
 from __future__ import annotations
 
-import pickle
-
+import pickle  # noqa: I001
 
 # Security issue 1: Hardcoded secret
 AWS_ACCESS_KEY = "AKIAIOSFODNN7EXAMPLE"  # type: ignore[var-name]
