@@ -2,10 +2,27 @@
 
 from __future__ import annotations
 
+from typing import Annotated
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from ai_council_review.models.pr import FileInfo, PRMetadata
 from ai_council_review.models.review import CostRecord, Finding, ReviewComment
+
+
+def _merge_agent_outputs(
+    left: dict[str, list[Finding]],
+    right: dict[str, list[Finding]],
+) -> dict[str, list[Finding]]:
+    """Merge agent outputs from parallel agent nodes.
+
+    LangGraph v0.2 requires an Annotated reducer for keys that
+    receive concurrent updates from parallel nodes.
+    """
+    merged = left.copy()
+    for key, value in right.items():
+        merged[key] = value
+    return merged
 
 
 class ReviewState(BaseModel):
@@ -13,7 +30,9 @@ class ReviewState(BaseModel):
 
     pr_metadata: PRMetadata | None = None
     changed_files: list[FileInfo] = Field(default_factory=list)
-    agent_outputs: dict[str, list[Finding]] = Field(default_factory=dict)
+    agent_outputs: Annotated[dict[str, list[Finding]], _merge_agent_outputs] = Field(
+        default_factory=dict
+    )
     synthesis: str | None = None
     github_comments: list[ReviewComment] = Field(default_factory=list)
     summary: str | None = None

@@ -16,6 +16,7 @@ logger = structlog.get_logger()
 
 # Conservative pricing per 1M tokens (input, output) in USD
 _DEFAULT_PRICING: dict[str, tuple[float, float]] = {
+    "accounts/fireworks/routers/kimi-k2p6-turbo": (2.50, 2.50),
     "accounts/fireworks/models/llama-v3p1-70b-instruct": (0.50, 0.50),
     "accounts/fireworks/models/llama-v3p1-8b-instruct": (0.20, 0.20),
     "accounts/fireworks/models/llama-v3p1-405b-instruct": (2.00, 2.00),
@@ -131,6 +132,8 @@ class CostTracker:
             return _DEFAULT_PRICING[model]
 
         # Partial match for known model families
+        if "kimi-k2p6" in model:
+            return _DEFAULT_PRICING["accounts/fireworks/routers/kimi-k2p6-turbo"]
         if "llama-v3p1-70b" in model:
             return _DEFAULT_PRICING["accounts/fireworks/models/llama-v3p1-70b-instruct"]
         if "llama-v3p1-8b" in model:

@@ -73,7 +73,7 @@ def build_router_chain(config: CouncilConfig) -> Any:
         agent_config = AgentConfig(
             enabled=True,
             model="fireworks",
-            model_name="accounts/fireworks/models/llama-v3p1-70b-instruct",
+            model_name="accounts/fireworks/routers/kimi-k2p6-turbo",
             temperature=0.1,
             max_tokens=2000,
         )
