@@ -183,7 +183,7 @@ def main() -> int:
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(graph.invoke, state)
             try:
-                final_state = cast(ReviewState, future.result(timeout=config.total_timeout_seconds))
+                result = future.result(timeout=config.total_timeout_seconds)
             except concurrent.futures.TimeoutError:
                 logger.error(
                     "Overall graph timeout",
@@ -192,6 +192,12 @@ def main() -> int:
                 if args.debug or os.environ.get("AI_COUNCIL__DEBUG") == "1":
                     dump_state(state)
                 return 1
+
+        # LangGraph v0.2 returns a dict or StateSnapshot; convert to ReviewState
+        if isinstance(result, dict):
+            final_state = ReviewState(**result)
+        else:
+            final_state = ReviewState(**result.model_dump())
 
         # Dump debug state if requested
         if args.debug or os.environ.get("AI_COUNCIL__DEBUG") == "1":
