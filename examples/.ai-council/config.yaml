@@ -60,7 +60,7 @@ agents:
     model: fireworks
     model_name: accounts/fireworks/models/llama-v3p1-70b-instruct
     temperature: 0.2
-    max_tokens: 4000
+    max_tokens: 16000
 
   # Quality checks for bugs, logic errors, type safety, missing tests, and readability.
   quality:
@@ -68,7 +68,7 @@ agents:
     model: fireworks
     model_name: accounts/fireworks/models/llama-v3p1-70b-instruct
     temperature: 0.3
-    max_tokens: 4000
+    max_tokens: 16000
 
   # Architecture checks cross-file impact, documentation freshness, API consistency,
   # and dependency alignment. This is the primary agent for repository browsing.
@@ -77,7 +77,7 @@ agents:
     model: fireworks
     model_name: accounts/fireworks/models/llama-v3p1-70b-instruct
     temperature: 0.3
-    max_tokens: 4000
+    max_tokens: 16000
 
   # Synthesis merges all agent outputs, deduplicates, prioritizes, and formats
   # the final review. Use a strong reasoning model here.
@@ -86,7 +86,7 @@ agents:
     model: fireworks
     model_name: accounts/fireworks/models/llama-v3p1-70b-instruct
     temperature: 0.2
-    max_tokens: 4000
+    max_tokens: 16000
 
 # ── LLM Provider Settings ───────────────────────────────────────────────────
 # API keys are loaded from environment variables (AI_COUNCIL__FIREWORKS_API_KEY, etc.)

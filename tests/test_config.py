@@ -24,7 +24,7 @@ class TestAgentConfig:
         assert config.enabled is True
         assert config.model == "fireworks"
         assert config.temperature == 0.3
-        assert config.max_tokens == 4000
+        assert config.max_tokens == 16000
 
 
 class TestCouncilConfig:

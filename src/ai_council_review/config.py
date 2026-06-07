@@ -17,7 +17,7 @@ class AgentConfig(BaseModel):
     model: str = "fireworks"
     model_name: str = "accounts/fireworks/routers/kimi-k2p6-turbo"
     temperature: float = 0.3
-    max_tokens: int = 4000
+    max_tokens: int = 16000
     system_prompt: str | None = None
 
 
