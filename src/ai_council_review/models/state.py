@@ -30,7 +30,9 @@ class ReviewState(BaseModel):
 
     pr_metadata: PRMetadata | None = None
     changed_files: list[FileInfo] = Field(default_factory=list)
-    agent_outputs: Annotated[dict[str, list[Finding]], _merge_agent_outputs] = Field(default_factory=dict)
+    agent_outputs: Annotated[dict[str, list[Finding]], _merge_agent_outputs] = Field(
+        default_factory=dict
+    )
     synthesis: str | None = None
     github_comments: list[ReviewComment] = Field(default_factory=list)
     summary: str | None = None
