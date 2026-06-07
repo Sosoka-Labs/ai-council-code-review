@@ -15,7 +15,7 @@ class AgentConfig(BaseModel):
 
     enabled: bool = True
     model: str = "fireworks"
-    model_name: str = "accounts/fireworks/models/llama-v3p1-70b-instruct"
+    model_name: str = "accounts/fireworks/routers/kimi-k2p6-turbo"
     temperature: float = 0.3
     max_tokens: int = 4000
     system_prompt: str | None = None

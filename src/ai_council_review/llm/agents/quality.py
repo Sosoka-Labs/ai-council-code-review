@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any, cast
 
 import structlog
@@ -10,6 +9,7 @@ from langchain.agents import AgentExecutor, create_tool_calling_agent
 
 from ai_council_review.config import AgentConfig, CouncilConfig
 from ai_council_review.github.browser import RepositoryBrowser
+from ai_council_review.llm.agents.parsing import parse_findings
 from ai_council_review.llm.prompts.loader import load_prompt
 from ai_council_review.llm.providers.factory import LLMProviderFactory
 from ai_council_review.models import Finding, ReviewState
@@ -50,24 +50,6 @@ def _build_agent_variables(state: ReviewState) -> dict[str, Any]:
         "changed_files": file_list,
         "diff": diff_text,
     }
-
-
-def _parse_findings(text: str) -> list[Finding]:
-    """Parse findings from agent output string.
-
-    Args:
-        text: Raw agent output.
-
-    Returns:
-        List of parsed findings. Empty list on failure.
-    """
-    try:
-        data = json.loads(text)
-        if isinstance(data, list):
-            return [Finding(**item) for item in data if isinstance(item, dict)]
-    except Exception:
-        pass
-    return []
 
 
 def build_quality_executor(
@@ -121,7 +103,7 @@ def run_quality_agent(
         variables = _build_agent_variables(state)
         run_config = {"callbacks": callbacks} if callbacks else None
         result = executor.invoke(variables, config=run_config)  # type: ignore[arg-type]
-        findings = _parse_findings(result["output"])
+        findings = parse_findings(result["output"])
         logger.info("Quality agent finished", findings=len(findings))
         return findings
     except Exception as e:
