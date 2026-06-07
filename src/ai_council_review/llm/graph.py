@@ -161,9 +161,8 @@ def security_node(
     if state.skipped:
         return {}
 
-    browser = _get_browser()
     callbacks = _make_cost_callback(cost_tracker, "security", config)
-    findings = run_security_agent(state, config, browser, callbacks=callbacks)
+    findings = run_security_agent(state, config, None, callbacks=callbacks)
     return {
         "agent_outputs": {"security": findings},
     }
@@ -187,9 +186,8 @@ def quality_node(
     if state.skipped:
         return {}
 
-    browser = _get_browser()
     callbacks = _make_cost_callback(cost_tracker, "quality", config)
-    findings = run_quality_agent(state, config, browser, callbacks=callbacks)
+    findings = run_quality_agent(state, config, None, callbacks=callbacks)
     return {
         "agent_outputs": {"quality": findings},
     }
@@ -213,9 +211,8 @@ def architecture_node(
     if state.skipped:
         return {}
 
-    browser = _get_browser()
     callbacks = _make_cost_callback(cost_tracker, "architecture", config)
-    findings = run_architecture_agent(state, config, browser, callbacks=callbacks)
+    findings = run_architecture_agent(state, config, None, callbacks=callbacks)
     return {
         "agent_outputs": {"architecture": findings},
     }
