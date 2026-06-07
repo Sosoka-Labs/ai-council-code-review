@@ -106,7 +106,7 @@ def run_generalist_agent(
         findings = parse_findings(result["output"], agent_name="generalist")
         logger.info("Generalist agent finished", findings=len(findings))
         if not findings:
-            logger.debug("Generalist agent raw output", raw_output=result["output"])
+            logger.info("Generalist agent raw output", raw_output=result["output"])
         return findings
     except Exception as e:
         logger.error("Generalist agent failed", error=str(e))

@@ -106,7 +106,7 @@ def run_architecture_agent(
         findings = parse_findings(result["output"], agent_name="architecture")
         logger.info("Architecture agent finished", findings=len(findings))
         if not findings:
-            logger.debug("Architecture agent raw output", raw_output=result["output"])
+            logger.info("Architecture agent raw output", raw_output=result["output"])
         return findings
     except Exception as e:
         logger.error("Architecture agent failed", error=str(e))

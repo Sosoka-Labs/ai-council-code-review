@@ -109,13 +109,15 @@ QUALITY = ChatPromptTemplate.from_messages(
                 "\n"
                 "## Output Format\n"
                 "\n"
-                "Return a JSON array of findings:\n"
+                "Return a JSON array of findings. Each finding must be a JSON object with these exact fields:\n"
                 "- `path`: file path\n"
-                "- `position`: diff position (1-based from first @@) or null\n"
-                '- `severity`: "critical", "high", "medium", "low", "info"\n'
+                "- `line`: line number in the file (integer) or null\n"
+                '- `severity`: one of "critical", "high", "medium", "low", "info"\n'
                 '- `category`: "quality"\n'
                 "- `body`: detailed explanation with suggested fix\n"
-                "- `confidence`: 0.0–1.0"
+                "- `confidence`: 0.0-1.0\n"
+                "\n"
+                "Return only the JSON array. No markdown code blocks, no explanations before or after."
             ),
         ),
         (
@@ -174,13 +176,15 @@ SECURITY = ChatPromptTemplate.from_messages(
                 "\n"
                 "## Output Format\n"
                 "\n"
-                "Return a JSON array of findings:\n"
+                "Return a JSON array of findings. Each finding must be a JSON object with these exact fields:\n"
                 "- `path`: file path\n"
-                "- `position`: diff position (1-based from first @@) or null\n"
-                '- `severity`: "critical", "high", "medium", "low", "info"\n'
+                "- `line`: line number in the file (integer) or null\n"
+                '- `severity`: one of "critical", "high", "medium", "low", "info"\n'
                 '- `category`: "security"\n'
                 "- `body`: detailed explanation with remediation\n"
-                "- `confidence`: 0.0–1.0"
+                "- `confidence`: 0.0-1.0\n"
+                "\n"
+                "Return only the JSON array. No markdown code blocks, no explanations before or after."
             ),
         ),
         (
@@ -241,17 +245,17 @@ GENERALIST = ChatPromptTemplate.from_messages(
                 "\n"
                 "## Output Format\n"
                 "\n"
-                "Return your findings as a JSON array of objects with these fields:\n"
+                "Return your findings as a JSON array of objects with these exact fields:\n"
                 "- `path`: file path\n"
-                "- `position`: diff position (1-based from first @@) or null for "
-                "general comments\n"
+                "- `line`: line number in the file (integer) or null for general comments\n"
                 '- `severity`: one of "critical", "high", "medium", "low", "info"\n'
                 '- `category`: one of "quality", "security", "architecture", '
                 '"testing", "docs", "performance"\n'
                 "- `body`: the review comment text (markdown supported)\n"
-                "- `confidence`: float 0.0–1.0\n"
+                "- `confidence`: float 0.0-1.0\n"
                 "\n"
                 "If no issues are found, return an empty array."
+                "Return only the JSON array. No markdown code blocks, no explanations before or after."
             ),
         ),
         (
@@ -380,13 +384,15 @@ ARCHITECTURE = ChatPromptTemplate.from_messages(
                 "\n"
                 "## Output Format\n"
                 "\n"
-                "Return a JSON array of findings:\n"
+                "Return a JSON array of findings. Each finding must be a JSON object with these exact fields:\n"
                 "- `path`: file path\n"
-                "- `position`: diff position (1-based from first @@) or null\n"
-                '- `severity`: "critical", "high", "medium", "low", "info"\n'
+                "- `line`: line number in the file (integer) or null\n"
+                '- `severity`: one of "critical", "high", "medium", "low", "info"\n'
                 '- `category`: "architecture"\n'
                 "- `body`: detailed explanation with architectural recommendations\n"
-                "- `confidence`: 0.0–1.0"
+                "- `confidence`: 0.0-1.0\n"
+                "\n"
+                "Return only the JSON array. No markdown code blocks, no explanations before or after."
             ),
         ),
         (

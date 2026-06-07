@@ -106,7 +106,7 @@ def run_quality_agent(
         findings = parse_findings(result["output"], agent_name="quality")
         logger.info("Quality agent finished", findings=len(findings))
         if not findings:
-            logger.debug("Quality agent raw output", raw_output=result["output"])
+            logger.info("Quality agent raw output", raw_output=result["output"])
         return findings
     except Exception as e:
         logger.error("Quality agent failed", error=str(e))

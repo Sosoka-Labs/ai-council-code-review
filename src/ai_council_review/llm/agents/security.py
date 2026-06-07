@@ -106,7 +106,7 @@ def run_security_agent(
         findings = parse_findings(result["output"], agent_name="security")
         logger.info("Security agent finished", findings=len(findings))
         if not findings:
-            logger.debug("Security agent raw output", raw_output=result["output"])
+            logger.info("Security agent raw output", raw_output=result["output"])
         return findings
     except Exception as e:
         logger.error("Security agent failed", error=str(e))
