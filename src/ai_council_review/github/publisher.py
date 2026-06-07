@@ -134,13 +134,14 @@ class Publisher:
             "path": comment.path,
             "position": comment.position,
             "body": comment.body,
-            "side": comment.side,
         }
+        # GitHub API: "side" is only required when using "line" / "start_line";
+        # sending it alongside "position" can cause 422 errors.
         if comment.line is not None:
             result["line"] = comment.line
+            result["side"] = comment.side
         if comment.start_line is not None:
             result["start_line"] = comment.start_line
-        if comment.start_side is not None:
             result["start_side"] = comment.start_side
         return result
 
