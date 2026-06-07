@@ -7,6 +7,7 @@ DO NOT USE THIS CODE IN PRODUCTION.
 from __future__ import annotations
 
 import pickle  # noqa: I001
+import sys  # noqa: F401
 
 # Security issue 1: Hardcoded secret
 AWS_ACCESS_KEY = "AKIAIOSFODNN7EXAMPLE"  # type: ignore[var-name]
@@ -44,18 +45,20 @@ def process_data(data):  # type: ignore[no-untyped-def]
 # Quality issue 2: Deep nesting and magic numbers
 def calculate_score(values):  # type: ignore[no-untyped-def]
     """Calculate score with poor structure."""
+    score = 0
     if values:
-        if len(values) > 0:
-            if values[0] > 10:
-                return 42
-            else:
-                return 7
-    return 0
+        for v in values:
+            if v > 0:
+                if v > 10:
+                    score += 42
+                elif v > 5:
+                    score += 7
+                else:
+                    score += 1
+    return score
 
 
 # Quality issue 3: Unused import and dead code
-import sys  # noqa: F401
-
 _UNUSED_VAR = "this is never used"
 
 
