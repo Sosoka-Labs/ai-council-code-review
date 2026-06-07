@@ -134,6 +134,19 @@ def main() -> int:
         state.skip_reason = skip_reason
         state.changed_files = files
 
+        # Debug: log head_sha and actual git HEAD
+        import subprocess
+        try:
+            git_head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+        except Exception:
+            git_head = "unknown"
+        logger.info(
+            "PR metadata",
+            head_sha=pr.head_sha if pr else None,
+            git_head=git_head,
+            base_sha=pr.base_sha if pr else None,
+        )
+
         if skipped:
             logger.info("Skipping PR", pr=args.pr_number, reason=skip_reason)
             print(f"Skipping PR #{args.pr_number}: {skip_reason}")

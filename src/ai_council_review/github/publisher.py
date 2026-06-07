@@ -112,7 +112,13 @@ class Publisher:
                 commit_id=commit_id,
             )
         except GitHubAPIError:
-            logger.error("Failed to post review")
+            logger.error(
+                "Failed to post review",
+                pr_number=pr_number,
+                commit_id=commit_id,
+                comment_count=len(comments),
+                first_comment=comments[0] if comments else None,
+            )
             raise
 
     def _comment_to_dict(self, comment: ReviewComment) -> dict[str, Any]:
