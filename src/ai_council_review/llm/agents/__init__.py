@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from ai_council_review.llm.agents.architecture import (
-    build_architecture_executor,
+    build_architecture_chain,
     run_architecture_agent,
 )
 from ai_council_review.llm.agents.generalist import (
@@ -11,7 +11,7 @@ from ai_council_review.llm.agents.generalist import (
     run_generalist_agent,
 )
 from ai_council_review.llm.agents.quality import (
-    build_quality_executor,
+    build_quality_chain,
     run_quality_agent,
 )
 from ai_council_review.llm.agents.router import (
@@ -20,7 +20,7 @@ from ai_council_review.llm.agents.router import (
     run_router_agent,
 )
 from ai_council_review.llm.agents.security import (
-    build_security_executor,
+    build_security_chain,
     run_security_agent,
 )
 from ai_council_review.llm.agents.synthesis import (
@@ -32,11 +32,11 @@ from ai_council_review.llm.agents.synthesis import (
 __all__ = [
     "RouterOutput",
     "SynthesisOutput",
-    "build_architecture_executor",
+    "build_architecture_chain",
     "build_generalist_executor",
-    "build_quality_executor",
+    "build_quality_chain",
     "build_router_chain",
-    "build_security_executor",
+    "build_security_chain",
     "build_synthesis_chain",
     "run_architecture_agent",
     "run_generalist_agent",

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any
 
 import structlog
-from langchain.agents import AgentExecutor, create_tool_calling_agent
+from langchain_core.runnables import Runnable
 
 from ai_council_review.config import AgentConfig, CouncilConfig
 from ai_council_review.github.browser import RepositoryBrowser
@@ -13,7 +13,6 @@ from ai_council_review.llm.agents.parsing import parse_findings
 from ai_council_review.llm.prompts.loader import load_prompt
 from ai_council_review.llm.providers.factory import LLMProviderFactory
 from ai_council_review.models import Finding, ReviewState
-from ai_council_review.tools.repository import make_repository_tools
 
 logger = structlog.get_logger()
 
@@ -52,31 +51,23 @@ def _build_agent_variables(state: ReviewState) -> dict[str, Any]:
     }
 
 
-def build_security_executor(
+def build_security_chain(
     config: CouncilConfig,
     browser: RepositoryBrowser | None,
-) -> AgentExecutor:
-    """Build an AgentExecutor for the security agent.
+) -> Runnable[dict[str, Any], Any]:
+    """Build a simple LLM chain for the security agent.
 
     Args:
         config: Global council configuration.
-        browser: Repository browser for cross-file awareness.
+        browser: Repository browser (unused, kept for API compatibility).
 
     Returns:
-        Configured AgentExecutor.
+        Configured Runnable chain.
     """
     agent_config = config.agents.get("security", AgentConfig())
     llm = LLMProviderFactory.from_config(agent_config, config.providers)
-    tools = make_repository_tools(browser)
     prompt = load_prompt("security")
-
-    agent = cast(Any, create_tool_calling_agent(llm, tools, prompt))
-    return AgentExecutor(
-        agent=agent,
-        tools=tools,
-        max_execution_time=config.agent_timeout_seconds,
-        max_iterations=10,
-    )
+    return prompt | llm
 
 
 def run_security_agent(
@@ -97,16 +88,17 @@ def run_security_agent(
         List of findings.
     """
     logger.info("Security agent starting")
-    executor = build_security_executor(config, browser)
+    chain = build_security_chain(config, browser)
 
     try:
         variables = _build_agent_variables(state)
         run_config = {"callbacks": callbacks} if callbacks else None
-        result = executor.invoke(variables, config=run_config)  # type: ignore[arg-type]
-        findings = parse_findings(result["output"], agent_name="security", logger=logger)
+        message = chain.invoke(variables, config=run_config)  # type: ignore[arg-type]
+        output = message.content if hasattr(message, "content") else str(message)
+        findings = parse_findings(output, agent_name="security", logger=logger)
         logger.info("Security agent finished", findings=len(findings))
         if not findings:
-            logger.info("Security agent raw output", raw_output=result["output"])
+            logger.info("Security agent raw output", raw_output=output)
         return findings
     except Exception as e:
         logger.error("Security agent failed", error=str(e))

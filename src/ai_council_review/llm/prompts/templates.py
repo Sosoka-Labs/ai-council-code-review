@@ -7,7 +7,7 @@ are not interpreted as template variables.
 
 from __future__ import annotations
 
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.prompts import ChatPromptTemplate
 
 ROUTER = ChatPromptTemplate.from_messages(
     [
@@ -136,7 +136,6 @@ QUALITY = ChatPromptTemplate.from_messages(
                 "```"
             ),
         ),
-        MessagesPlaceholder(variable_name="agent_scratchpad"),
     ],
     template_format="jinja2",
 )
@@ -203,7 +202,6 @@ SECURITY = ChatPromptTemplate.from_messages(
                 "```"
             ),
         ),
-        MessagesPlaceholder(variable_name="agent_scratchpad"),
     ],
     template_format="jinja2",
 )
@@ -274,7 +272,6 @@ GENERALIST = ChatPromptTemplate.from_messages(
                 "```"
             ),
         ),
-        MessagesPlaceholder(variable_name="agent_scratchpad"),
     ],
     template_format="jinja2",
 )
@@ -411,7 +408,6 @@ ARCHITECTURE = ChatPromptTemplate.from_messages(
                 "```"
             ),
         ),
-        MessagesPlaceholder(variable_name="agent_scratchpad"),
     ],
     template_format="jinja2",
 )
