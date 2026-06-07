@@ -7,7 +7,7 @@ import concurrent.futures
 import json
 import os
 import sys
-from typing import Any, cast
+from typing import Any
 
 import structlog
 

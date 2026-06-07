@@ -12,7 +12,7 @@ from ai_council_review.github.browser import RepositoryBrowser
 from ai_council_review.llm.agents.parsing import parse_findings
 from ai_council_review.llm.prompts.loader import load_prompt
 from ai_council_review.llm.providers.factory import LLMProviderFactory
-from ai_council_review.models import ReviewState
+from ai_council_review.models import Finding, ReviewState
 from ai_council_review.tools.repository import make_repository_tools
 
 logger = structlog.get_logger()
