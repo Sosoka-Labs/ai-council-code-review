@@ -21,9 +21,10 @@ jobs:
     if: github.event.pull_request.draft == false
 
     steps:
-      - name: Checkout PR branch
+      - name: Checkout PR HEAD
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
       - name: Fetch base branch

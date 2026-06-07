@@ -111,7 +111,32 @@ class Publisher:
                 event=event,
                 commit_id=commit_id,
             )
-        except GitHubAPIError:
+        except GitHubAPIError as e:
+            # 422 often means an inline comment is invalid. Fall back to a
+            # body-only review so the findings are not lost entirely.
+            error_msg = str(e)
+            if comments and "422" in error_msg:
+                logger.warning(
+                    "Inline review failed with 422; retrying as body-only review",
+                    pr_number=pr_number,
+                    comment_count=len(comments),
+                )
+                fallback_body = body + "\n\n**Inline comments (fall-back):**\n"
+                for c in comments:
+                    fallback_body += f"\n- `{c['path']}:{c.get('line', '?')}` — {c['body'][:200]}"
+                try:
+                    self.client.post_review(
+                        number=pr_number,
+                        body=fallback_body,
+                        comments=[],
+                        event=event,
+                        commit_id=commit_id,
+                    )
+                    logger.info("Posted body-only fallback review")
+                    return
+                except GitHubAPIError:
+                    logger.error("Fallback review also failed")
+                    raise
             logger.error(
                 "Failed to post review",
                 pr_number=pr_number,
@@ -124,6 +149,8 @@ class Publisher:
     def _comment_to_dict(self, comment: ReviewComment) -> dict[str, Any]:
         """Convert a ReviewComment to a dict for the GitHub API.
 
+        Uses line + side (the modern API) instead of the deprecated position.
+
         Args:
             comment: ReviewComment instance.
 
@@ -132,14 +159,15 @@ class Publisher:
         """
         result: dict[str, Any] = {
             "path": comment.path,
-            "position": comment.position,
             "body": comment.body,
         }
-        # GitHub API: "side" is only required when using "line" / "start_line";
-        # sending it alongside "position" can cause 422 errors.
+        # Prefer line + side over the deprecated position parameter.
         if comment.line is not None:
             result["line"] = comment.line
             result["side"] = comment.side
+        elif comment.position is not None:
+            # Fallback for older callers that still set position
+            result["position"] = comment.position
         if comment.start_line is not None:
             result["start_line"] = comment.start_line
             result["start_side"] = comment.start_side

@@ -13,10 +13,10 @@ class ReviewComment(BaseModel):
     """An inline review comment to post on a PR."""
 
     path: str
-    position: int
     body: str
-    side: str = "RIGHT"
+    position: int | None = None
     line: int | None = None
+    side: str = "RIGHT"
     start_line: int | None = None
     start_side: str | None = None
 

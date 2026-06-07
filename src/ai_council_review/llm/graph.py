@@ -304,19 +304,21 @@ def post_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
             patch_lookup[file.filename] = file.patch
 
     # Convert findings to ReviewComments
+    # We use line + side instead of the deprecated position parameter.
+    # GitHub docs: "The position parameter is closing down. Use line instead."
     comments: list[ReviewComment] = []
     skipped_findings: list[Finding] = []
     for finding in all_findings:
-        # Always compute position from line number; ignore any position
-        # the LLM may have returned (it is usually a file line number, not a
-        # diff position).
-        position: int | None = None
+        # Validate the finding line is in a changed patch (added line).
+        # If the line is not in the patch, we skip the inline comment.
+        is_valid = False
         if finding.line is not None:
             patch = patch_lookup.get(finding.path)
             if patch:
-                position = get_position_for_line(patch, finding.line)
+                # get_position_for_line only returns a position for added lines
+                is_valid = get_position_for_line(patch, finding.line) is not None
 
-        if position is not None:
+        if is_valid:
             # Build comment body with agent attribution
             body_parts: list[str] = []
             if finding.agent:
@@ -331,14 +333,15 @@ def post_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
             comments.append(
                 ReviewComment(
                     path=finding.path,
-                    position=position,
+                    line=finding.line,
+                    side="RIGHT",
                     body=body,
                 )
             )
         else:
             skipped_findings.append(finding)
             logger.info(
-                "Skipping inline comment (no position)",
+                "Skipping inline comment (not an added line in patch)",
                 path=finding.path,
                 line=finding.line,
             )
