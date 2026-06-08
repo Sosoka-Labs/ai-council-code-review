@@ -312,6 +312,24 @@ class TestFilterFiles:
         assert "helpers.pyc" not in filenames
         assert "vendor/lib.py" not in filenames
 
+    def test_filter_files_glob_patterns(self, ingestor: PRIngestor) -> None:
+        """Glob-style patterns filter correctly."""
+        ingestor.config.skip_patterns = ["*.snap", "**/*.pyc", "dist/"]
+        files = [
+            FileInfo(filename="test.snap", status="modified"),
+            FileInfo(filename="src/__pycache__/module.pyc", status="modified"),
+            FileInfo(filename="dist/bundle.js", status="added"),
+            FileInfo(filename="src/main.py", status="modified"),
+        ]
+
+        result = ingestor.filter_files(files)
+        filenames = [f.filename for f in result]
+
+        assert "src/main.py" in filenames
+        assert "test.snap" not in filenames
+        assert "src/__pycache__/module.pyc" not in filenames
+        assert "dist/bundle.js" not in filenames
+
 
 class TestIngestFull:
     """Tests for full ingest pipeline."""

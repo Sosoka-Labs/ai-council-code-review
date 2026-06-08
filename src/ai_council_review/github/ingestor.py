@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import os
 from typing import Any, cast
@@ -155,6 +156,11 @@ class PRIngestor:
     def _should_skip_file(self, filename: str) -> bool:
         """Check if a file should be skipped based on patterns.
 
+        Supports glob-style patterns:
+        - Exact match: `package-lock.json`
+        - Substring/directory: `dist/` (matches `dist/bundle.js`)
+        - Wildcards: `*.snap`, `**/*.pyc`
+
         Args:
             filename: The file path.
 
@@ -162,7 +168,9 @@ class PRIngestor:
             True if the file should be skipped.
         """
         for pattern in self.config.skip_patterns:
-            if pattern in filename or filename.endswith(pattern):
+            if fnmatch.fnmatch(filename, pattern):
+                return True
+            if pattern in filename:
                 return True
         return False
 

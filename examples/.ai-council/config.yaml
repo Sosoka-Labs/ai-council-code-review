@@ -18,15 +18,16 @@ skip_labels:                    # Skip PRs with any of these labels
   - "skip-ai-review"
   - "wip"
 skip_patterns:                  # Skip files matching these patterns
-  - "package-lock.json"
+  - "package-lock.json"           # Exact filename match
   - "yarn.lock"
   - "poetry.lock"
   - "Cargo.lock"
   - "Gemfile.lock"
-  - "*.snap"
-  - "dist/"
+  - "*.snap"                      # Glob wildcard: all .snap files
+  - "dist/"                       # Directory prefix: anything under dist/
   - "build/"
   - "node_modules/"
+  - "**/*.pyc"                    # Glob: all .pyc files in any directory
 
 # ── Cost & Timeout Control ──────────────────────────────────────────────────
 budget_usd: 5.00                # Max estimated cost per PR
