@@ -1,0 +1,44 @@
+name: Bug Report
+description: Report a bug or unexpected behavior
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug!
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the bug and what you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Provide a minimal example or workflow that triggers the issue.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or output
+      description: Paste any error messages or GitHub Actions log output.
+      render: shell
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: What version of AI Council are you using?
+      placeholder: e.g., v1.0.0
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I have read the README and troubleshooting section
+          required: true
+        - label: I have checked that this issue has not already been reported
+          required: true
