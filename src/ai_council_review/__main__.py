@@ -11,7 +11,8 @@ from typing import Any
 
 import structlog
 
-from ai_council_review.config import load_config
+from ai_council_review.config import load_config, validate_config
+from ai_council_review.exceptions import ConfigError, LLMProviderError
 from ai_council_review.github.client import GitHubClient
 from ai_council_review.github.ingestor import PRIngestor
 from ai_council_review.llm.graph import build_graph
@@ -82,6 +83,7 @@ def main() -> int:
 
     try:
         config = load_config(args.config)
+        validate_config(config)
         logger.info("Config loaded", config_path=args.config or ".ai-council/config.yaml")
 
         # Build initial state
@@ -233,9 +235,24 @@ def main() -> int:
         print(json.dumps(summary_output, indent=2))
         return 0
 
+    except ConfigError as e:
+        logger.error("Configuration error", error=str(e))
+        print(
+            f"Configuration error: {e}\nSee README.md > Quick Start for setup instructions.",
+            file=sys.stderr,
+        )
+        return 1
+    except LLMProviderError as e:
+        logger.error("LLM provider error", error=str(e))
+        print(
+            f"LLM provider error: {e}\n"
+            "Check your API key and model name in .ai-council/config.yaml.",
+            file=sys.stderr,
+        )
+        return 1
     except Exception as e:
-        logger.error("Review failed", error=str(e))
-        print(f"Error: {e}", file=sys.stderr)
+        logger.error("Unexpected error", error=str(e))
+        print(f"Unexpected error: {e}", file=sys.stderr)
         return 1
 
 

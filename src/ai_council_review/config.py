@@ -2,12 +2,30 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+MODEL_ALIASES: dict[str, str] = {
+    "fireworks/llama-3.1-70b": "accounts/fireworks/models/llama-v3p1-70b-instruct",
+    "fireworks/llama-3.1-8b": "accounts/fireworks/models/llama-v3p1-8b-instruct",
+    "fireworks/kimi-k2p6": "accounts/fireworks/routers/kimi-k2p6-turbo",
+    "openai/gpt-4o": "gpt-4o",
+    "openai/gpt-4.1": "gpt-4.1",
+    "openai/gpt-4.1-mini": "gpt-4.1-mini",
+    "anthropic/claude-sonnet": "claude-sonnet-4-20250514",
+    "anthropic/claude-haiku": "claude-3-haiku-20240307",
+}
+
+_BARE_ENV_VARS: dict[str, str] = {
+    "fireworks": "FIREWORKS_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+}
 
 
 class AgentConfig(BaseModel):
@@ -19,6 +37,11 @@ class AgentConfig(BaseModel):
     temperature: float = 0.3
     max_tokens: int = 16000
     system_prompt: str | None = None
+
+    @field_validator("model_name", mode="before")
+    @classmethod
+    def _resolve_alias(cls, value: str) -> str:
+        return MODEL_ALIASES.get(value, value)
 
 
 class ProviderConfig(BaseModel):
@@ -122,3 +145,56 @@ def load_config(config_path: str | Path | None = None) -> CouncilConfig:
     data["providers"] = providers
 
     return CouncilConfig(**data)
+
+
+def _provider_has_key(provider_name: str, provider_cfg: ProviderConfig) -> bool:
+    """Check whether a provider has a usable API key.
+
+    Checks the config key, the bare env var (e.g. FIREWORKS_API_KEY),
+    and the AI_COUNCIL__ prefixed env var.
+    """
+    if provider_cfg.api_key:
+        return True
+    bare_env = _BARE_ENV_VARS.get(provider_name)
+    if bare_env and os.environ.get(bare_env):
+        return True
+    prefixed_env = f"AI_COUNCIL__{bare_env}" if bare_env else None
+    return bool(prefixed_env and os.environ.get(prefixed_env))
+
+
+def validate_config(config: CouncilConfig) -> None:
+    """Validate that the configuration is ready for a review run.
+
+    Raises:
+        ConfigError: If no API key is available for any enabled agent.
+    """
+    from ai_council_review.exceptions import ConfigError
+
+    enabled_agents = [(name, cfg) for name, cfg in config.agents.items() if cfg.enabled]
+
+    if not enabled_agents:
+        # Default agents are implicitly enabled; if the user explicitly
+        # disabled everything, we still need a key for the default set.
+        enabled_agents = [
+            ("router", AgentConfig()),
+            ("security", AgentConfig()),
+            ("quality", AgentConfig()),
+            ("architecture", AgentConfig()),
+            ("synthesis", AgentConfig()),
+        ]
+
+    missing: list[str] = []
+    for name, agent_cfg in enabled_agents:
+        provider = agent_cfg.model.lower()
+        provider_cfg = config.providers.get(provider, ProviderConfig())
+        if not _provider_has_key(provider, provider_cfg):
+            missing.append(f"{name} ({provider})")
+
+    if missing:
+        raise ConfigError(
+            "No LLM API key found for the following enabled agents: "
+            f"{', '.join(missing)}. "
+            "Set one of: FIREWORKS_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY "
+            "(or the AI_COUNCIL__* prefixed variants) in your environment or "
+            ".ai-council/config.yaml. See README.md > Quick Start."
+        )
