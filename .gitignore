@@ -220,3 +220,6 @@ __marimo__/
 
 # LLM working memory (team context files, not for repo)
 llm_memory/
+
+# Internal reference/research docs (not for public repo)
+reference/
