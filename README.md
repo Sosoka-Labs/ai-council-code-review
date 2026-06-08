@@ -1,5 +1,10 @@
 # AI Council Code Review
 
+[![CI](https://github.com/Sosoka-Labs/ai-council-code-review/actions/workflows/ci.yml/badge.svg)](https://github.com/Sosoka-Labs/ai-council-code-review/actions/workflows/ci.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Version](https://img.shields.io/badge/version-1.0.0-green.svg)](https://github.com/Sosoka-Labs/ai-council-code-review/releases)
+
 A configurable, multi-agent AI code review system for GitHub Actions. Unlike single-agent tools that review diffs in isolation, AI Council dispatches a council of specialized agents that can browse your repository in real time to check unchanged files for consistency, security, and architectural impact.
 
 ---
@@ -110,6 +115,8 @@ In your repository settings, go to **Settings > Secrets and variables > Actions*
 - `OPENAI_API_KEY` — alternative
 - `ANTHROPIC_API_KEY` — alternative
 
+> **Note:** The workflow above passes these secrets as bare environment variables (e.g., `FIREWORKS_API_KEY`), which LangChain reads automatically. If you prefer to set them via the config system, use the `AI_COUNCIL__FIREWORKS_API_KEY` style instead.
+
 ### 3. (Optional) Customize behavior
 
 Add `.ai-council/config.yaml` to your repository root to customize agents, models, and rules. See [Configuration](#configuration) and the [example config](examples/.ai-council/config.yaml).
@@ -218,6 +225,48 @@ AI_COUNCIL__ANTHROPIC_API_KEY=sk-ant-xxxxxxxx
 AI_COUNCIL__GITHUB_TOKEN=ghp_xxxxxxxx
 ```
 
+### Model aliases
+
+You can use shorthand names instead of full provider paths:
+
+| Alias | Resolves to |
+|-------|-------------|
+| `fireworks/llama-3.1-70b` | `accounts/fireworks/models/llama-v3p1-70b-instruct` |
+| `fireworks/llama-3.1-8b` | `accounts/fireworks/models/llama-v3p1-8b-instruct` |
+| `fireworks/kimi-k2p6` | `accounts/fireworks/routers/kimi-k2p6-turbo` |
+| `openai/gpt-4o` | `gpt-4o` |
+| `openai/gpt-4.1` | `gpt-4.1` |
+| `openai/gpt-4.1-mini` | `gpt-4.1-mini` |
+| `anthropic/claude-sonnet` | `claude-sonnet-4-20250514` |
+| `anthropic/claude-haiku` | `claude-3-haiku-20240307` |
+
+### Mixed-provider example
+
+You can mix providers and models per agent to optimize cost and quality:
+
+```yaml
+agents:
+  router:
+    model: openai
+    model_name: openai/gpt-4.1-mini   # fast, cheap
+    temperature: 0.1
+    max_tokens: 2000
+
+  security:
+    model: fireworks
+    model_name: fireworks/llama-3.1-70b
+    temperature: 0.2
+    max_tokens: 16000
+
+  synthesis:
+    model: anthropic
+    model_name: anthropic/claude-sonnet  # strong reasoning
+    temperature: 0.2
+    max_tokens: 16000
+```
+
+> **Tip:** Model choice directly affects cost. Using a cheaper model for Router and a stronger one for Synthesis is the recommended balance.
+
 ### Override prompts
 
 You can override any agent's system prompt by adding a `system_prompt` field to that agent's config:
@@ -313,6 +362,29 @@ Download the artifact from the GitHub Actions run page under **Artifacts**.
 
 ---
 
+## Troubleshooting
+
+| Error | Likely cause | Fix |
+|-------|-------------|-----|
+| `Configuration error: No LLM API key found` | Missing or misnamed secret | Add `FIREWORKS_API_KEY` (or `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) to **Settings > Secrets and variables > Actions**. See [Quick Start > Add your API key](#2-add-your-api-key). |
+| `LLM provider error: Unsupported provider: xyz` | Typo in `model` field | Use one of: `fireworks`, `openai`, `anthropic`. Check `.ai-council/config.yaml`. |
+| `LLM provider error: Failed to initialize...` | Invalid API key or model name | Verify the secret value and the `model_name` in config. Try an alias from the [Model aliases](#model-aliases) table. |
+| `Review failed with timeout` | PR too large or model too slow | Reduce `max_files` / `max_lines` in config, or increase `agent_timeout_seconds` / `total_timeout_seconds`. |
+| `No review posted on fork PR` | Expected default behavior | Fork PRs are skipped by default (`comment_on_forks: false`). See [Security > Fork behavior](#fork-behavior). |
+| `Agent output is empty or garbled` | Model context too short for JSON | Increase `max_tokens` for the affected agent (e.g., 16000 for Fireworks reasoning models). |
+
+---
+
+## Known Limitations
+
+- **v1 is stateless** — AI Council does not learn from past reviews or remember project conventions between runs.
+- **No IDE or CLI tool** — The only supported interface is the GitHub Actions workflow.
+- **No custom provider support** — Only Fireworks.ai, OpenAI, and Anthropic are supported in v1.
+- **Max 50 files / 2000 lines default** — Large PRs are skipped by default to control cost and runtime.
+- **Language-agnostic but not language-aware** — Agents infer language from file extensions; there are no language-specific rules or parsers.
+
+---
+
 ## Security
 
 ### Secrets handling
@@ -364,6 +436,29 @@ For full project conventions, branching strategy, and agent architecture, see `A
 
 ---
 
+## Branching & Release Strategy
+
+This project uses **trunk-based development** with a single long-lived branch:
+
+- **`main`** — Always production-ready. All releases are tagged from `main`.
+- **Feature branches** — Short-lived branches from `main` (e.g., `feature/my-feature`).
+
+For consumers, we recommend **pinning to a release tag** rather than `main` in your workflow:
+
+```yaml
+# Pin to a stable release
+- name: Checkout AI Council
+  uses: actions/checkout@v4
+  with:
+    repository: Sosoka-Labs/ai-council-code-review
+    ref: v1.0.0          # <-- pin here
+    path: ai-council
+```
+
+This lets us iterate on `main` without disrupting your workflow. New releases are announced in [CHANGELOG.md](CHANGELOG.md) and [GitHub Releases](https://github.com/Sosoka-Labs/ai-council-code-review/releases).
+
+---
+
 ## License
 
 MIT License. See [LICENSE](LICENSE) for details.
@@ -371,4 +466,4 @@ MIT License. See [LICENSE](LICENSE) for details.
 ---
 
 *Project status: v1.0 — Production-ready*
-*Last updated: 2026-06-02*
+*Last updated: 2026-06-08*

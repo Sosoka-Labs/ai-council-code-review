@@ -40,7 +40,10 @@ rate_limit_threshold: 50        # Enter conservative mode below this threshold
 # and given a custom system prompt.
 #
 # `model` is the provider name: fireworks, openai, or anthropic
-# `model_name` is the full model identifier the provider expects
+# `model_name` can be a full model identifier or a shorthand alias:
+#   fireworks/llama-3.1-70b, fireworks/llama-3.1-8b, fireworks/kimi-k2p6
+#   openai/gpt-4o, openai/gpt-4.1, openai/gpt-4.1-mini
+#   anthropic/claude-sonnet, anthropic/claude-haiku
 # `temperature` controls creativity vs determinism
 # `max_tokens` caps the response length
 
@@ -50,7 +53,7 @@ agents:
   router:
     enabled: true
     model: fireworks
-    model_name: accounts/fireworks/models/llama-v3p1-70b-instruct
+    model_name: fireworks/llama-3.1-8b   # fast, cheap
     temperature: 0.1
     max_tokens: 2000
 
@@ -58,7 +61,7 @@ agents:
   security:
     enabled: true
     model: fireworks
-    model_name: accounts/fireworks/models/llama-v3p1-70b-instruct
+    model_name: fireworks/llama-3.1-70b
     temperature: 0.2
     max_tokens: 16000
 
@@ -66,7 +69,7 @@ agents:
   quality:
     enabled: true
     model: fireworks
-    model_name: accounts/fireworks/models/llama-v3p1-70b-instruct
+    model_name: fireworks/llama-3.1-70b
     temperature: 0.3
     max_tokens: 16000
 
@@ -75,7 +78,7 @@ agents:
   architecture:
     enabled: true
     model: fireworks
-    model_name: accounts/fireworks/models/llama-v3p1-70b-instruct
+    model_name: fireworks/llama-3.1-70b
     temperature: 0.3
     max_tokens: 16000
 
@@ -84,12 +87,12 @@ agents:
   synthesis:
     enabled: true
     model: fireworks
-    model_name: accounts/fireworks/models/llama-v3p1-70b-instruct
+    model_name: fireworks/kimi-k2p6      # strong reasoning
     temperature: 0.2
     max_tokens: 16000
 
 # ── LLM Provider Settings ───────────────────────────────────────────────────
-# API keys are loaded from environment variables (AI_COUNCIL__FIREWORKS_API_KEY, etc.)
+# API keys are loaded from environment variables (FIREWORKS_API_KEY, etc.)
 # but you can hardcode them here if needed (not recommended for public repos).
 
 providers:
