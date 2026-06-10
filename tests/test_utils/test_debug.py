@@ -8,6 +8,7 @@ from pathlib import Path
 from ai_council_review.models import PRMetadata, ReviewState
 from ai_council_review.utils.debug import (
     _is_secret_key,
+    _looks_like_secret,
     _strip_secrets,
     dump_state,
 )
@@ -45,7 +46,7 @@ class TestDumpState:
             pr_metadata=PRMetadata(
                 number=42,
                 title="Test PR",
-                body="API key is sk-abc123",
+                body="sk-abc123",
                 state="open",
                 author="test",
                 author_association="OWNER",
@@ -93,6 +94,26 @@ class TestStripSecrets:
         assert result["message"] == "***REDACTED***"
         assert result["note"] == "***REDACTED***"
         assert result["normal"] == "hello world"
+
+
+class TestLooksLikeSecret:
+    """Tests for _looks_like_secret."""
+
+    def test_flask_app_is_not_redacted(self) -> None:
+        """String containing a prefix in the middle is not treated as a secret."""
+        assert _looks_like_secret("flask-app") is False
+
+    def test_sk_prefixed_value_is_redacted(self) -> None:
+        """String starting with a known secret prefix is identified as a secret."""
+        assert _looks_like_secret("sk-abcdef") is True
+
+    def test_ghp_prefixed_value_is_redacted(self) -> None:
+        """String starting with ghp_ is identified as a secret."""
+        assert _looks_like_secret("ghp_abc123") is True
+
+    def test_plain_string_is_not_redacted(self) -> None:
+        """Ordinary string without a secret prefix is not a secret."""
+        assert _looks_like_secret("hello world") is False
 
 
 class TestIsSecretKey:

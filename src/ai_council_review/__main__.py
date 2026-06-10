@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import argparse
-import concurrent.futures
 import json
 import os
 import sys
+import threading
 from typing import Any
 
 import structlog
@@ -20,6 +20,34 @@ from ai_council_review.models import FileInfo, ReviewState
 from ai_council_review.utils.debug import dump_state
 
 logger = structlog.get_logger()
+
+_logging_configured = False
+
+
+def configure_logging() -> None:
+    """Configure structlog once; subsequent calls are no-ops."""
+    global _logging_configured
+    if _logging_configured:
+        return
+    structlog.configure(
+        processors=[
+            structlog.stdlib.filter_by_level,
+            structlog.stdlib.add_logger_name,
+            structlog.stdlib.add_log_level,
+            structlog.processors.TimeStamper(fmt="iso"),
+            structlog.processors.StackInfoRenderer(),
+            structlog.processors.format_exc_info,
+            structlog.processors.UnicodeDecoder(),
+            structlog.processors.JSONRenderer()
+            if os.environ.get("CI")
+            else structlog.dev.ConsoleRenderer(),
+        ],
+        context_class=dict,
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        wrapper_class=structlog.stdlib.BoundLogger,
+        cache_logger_on_first_use=True,
+    )
+    _logging_configured = True
 
 
 def parse_args() -> argparse.Namespace:
@@ -60,24 +88,7 @@ def main() -> int:
     Returns:
         Exit code.
     """
-    structlog.configure(
-        processors=[
-            structlog.stdlib.filter_by_level,
-            structlog.stdlib.add_logger_name,
-            structlog.stdlib.add_log_level,
-            structlog.processors.TimeStamper(fmt="iso"),
-            structlog.processors.StackInfoRenderer(),
-            structlog.processors.format_exc_info,
-            structlog.processors.UnicodeDecoder(),
-            structlog.processors.JSONRenderer()
-            if os.environ.get("CI")
-            else structlog.dev.ConsoleRenderer(),
-        ],
-        context_class=dict,
-        logger_factory=structlog.stdlib.LoggerFactory(),
-        wrapper_class=structlog.stdlib.BoundLogger,
-        cache_logger_on_first_use=True,
-    )
+    configure_logging()
 
     args = parse_args()
 
@@ -136,19 +147,7 @@ def main() -> int:
         state.skip_reason = skip_reason
         state.changed_files = files
 
-        # Debug: log head_sha and actual git HEAD
-        import subprocess
-
-        try:
-            git_head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
-        except Exception:
-            git_head = "unknown"
-        logger.info(
-            "PR metadata",
-            head_sha=pr.head_sha if pr else None,
-            git_head=git_head,
-            base_sha=pr.base_sha if pr else None,
-        )
+        logger.info("PR metadata", head_sha=pr.head_sha if pr else None, base_sha=pr.base_sha if pr else None)
 
         if skipped:
             logger.info("Skipping PR", pr=args.pr_number, reason=skip_reason)
@@ -196,18 +195,32 @@ def main() -> int:
 
         graph = build_graph(config)
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(graph.invoke, state)
+        result_holder: dict[str, Any] = {}
+        exc_holder: list[Exception] = []
+
+        def _run_graph() -> None:
             try:
-                result = future.result(timeout=config.total_timeout_seconds)
-            except concurrent.futures.TimeoutError:
-                logger.error(
-                    "Overall graph timeout",
-                    timeout=config.total_timeout_seconds,
-                )
-                if args.debug or os.environ.get("AI_COUNCIL__DEBUG") == "1":
-                    dump_state(state)
-                return 1
+                result_holder["result"] = graph.invoke(state)
+            except Exception as e:
+                exc_holder.append(e)
+
+        thread = threading.Thread(target=_run_graph, daemon=True)
+        thread.start()
+        thread.join(timeout=config.total_timeout_seconds)
+
+        if thread.is_alive():
+            logger.error(
+                "Overall graph timeout — process exiting, background thread will be killed",
+                timeout=config.total_timeout_seconds,
+            )
+            if args.debug or os.environ.get("AI_COUNCIL__DEBUG") == "1":
+                dump_state(state)
+            return 1
+
+        if exc_holder:
+            raise exc_holder[0]
+
+        result = result_holder["result"]
 
         # LangGraph v0.2 returns a dict or StateSnapshot; convert to ReviewState
         if isinstance(result, dict):

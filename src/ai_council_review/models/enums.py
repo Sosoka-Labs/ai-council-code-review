@@ -22,3 +22,5 @@ class FileStatus(str, Enum):
     REMOVED = "removed"
     MODIFIED = "modified"
     RENAMED = "renamed"
+    COPIED = "copied"
+    UNCHANGED = "unchanged"

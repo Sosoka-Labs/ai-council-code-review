@@ -10,6 +10,8 @@ import yaml
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+CANONICAL_AGENTS: list[str] = ["router", "security", "quality", "architecture", "synthesis"]
+
 MODEL_ALIASES: dict[str, str] = {
     "fireworks/llama-3.1-70b": "accounts/fireworks/models/llama-v3p1-70b-instruct",
     "fireworks/llama-3.1-8b": "accounts/fireworks/models/llama-v3p1-8b-instruct",
@@ -18,7 +20,7 @@ MODEL_ALIASES: dict[str, str] = {
     "openai/gpt-4.1": "gpt-4.1",
     "openai/gpt-4.1-mini": "gpt-4.1-mini",
     "anthropic/claude-sonnet": "claude-sonnet-4-20250514",
-    "anthropic/claude-haiku": "claude-3-haiku-20240307",
+    "anthropic/claude-haiku": "claude-3-5-haiku-20241022",
 }
 
 _BARE_ENV_VARS: dict[str, str] = {
@@ -73,6 +75,7 @@ class CouncilConfig(BaseModel):
             "dist/",
             "build/",
             "node_modules/",
+            "**/*.pyc",
         ]
     )
     budget_usd: float = 5.0
@@ -113,16 +116,20 @@ def load_config(config_path: str | Path | None = None) -> CouncilConfig:
         ValidationError: If the configuration is invalid.
         FileNotFoundError: If the config file is specified but not found.
     """
-    if config_path is None:
-        config_path = Path.cwd() / ".ai-council" / "config.yaml"
-    else:
-        config_path = Path(config_path)
+    explicit_path = config_path is not None
+    config_path = Path(config_path) if config_path is not None else Path.cwd() / ".ai-council" / "config.yaml"
 
     data: dict[str, Any] = {}
 
     if config_path.exists():
         with open(config_path, encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
+    elif explicit_path:
+        raise FileNotFoundError(
+            f"Config file not found: {config_path}. "
+            "Check the --config path and ensure the file exists."
+        )
+    # else: auto-discovery found nothing, use defaults silently
 
     env = EnvConfig()
     providers = data.get("providers", {})
@@ -150,16 +157,14 @@ def load_config(config_path: str | Path | None = None) -> CouncilConfig:
 def _provider_has_key(provider_name: str, provider_cfg: ProviderConfig) -> bool:
     """Check whether a provider has a usable API key.
 
-    Checks the config key, the bare env var (e.g. FIREWORKS_API_KEY),
-    and the AI_COUNCIL__ prefixed env var.
+    Checks the config key and the bare env var (e.g. FIREWORKS_API_KEY).
+    The AI_COUNCIL__-prefixed variants are resolved by EnvConfig at load time
+    and surfaced via provider_cfg.api_key, so they are covered by the first check.
     """
     if provider_cfg.api_key:
         return True
     bare_env = _BARE_ENV_VARS.get(provider_name)
-    if bare_env and os.environ.get(bare_env):
-        return True
-    prefixed_env = f"AI_COUNCIL__{bare_env}" if bare_env else None
-    return bool(prefixed_env and os.environ.get(prefixed_env))
+    return bool(bare_env and os.environ.get(bare_env))
 
 
 def validate_config(config: CouncilConfig) -> None:
@@ -175,13 +180,7 @@ def validate_config(config: CouncilConfig) -> None:
     if not enabled_agents:
         # Default agents are implicitly enabled; if the user explicitly
         # disabled everything, we still need a key for the default set.
-        enabled_agents = [
-            ("router", AgentConfig()),
-            ("security", AgentConfig()),
-            ("quality", AgentConfig()),
-            ("architecture", AgentConfig()),
-            ("synthesis", AgentConfig()),
-        ]
+        enabled_agents = [(name, AgentConfig()) for name in CANONICAL_AGENTS]
 
     missing: list[str] = []
     for name, agent_cfg in enabled_agents:

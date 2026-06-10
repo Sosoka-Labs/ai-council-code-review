@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -121,12 +120,11 @@ class TestGetFileContents:
     """Tests for get_file_contents."""
 
     def test_get_file_contents(self, client: GitHubClient) -> None:
-        """Mock requests.request for contents API with base64 response."""
+        """Mock requests.request for contents API with raw text response."""
         content = "Hello, world!"
-        encoded = base64.b64encode(content.encode("utf-8")).decode("utf-8")
         response = MagicMock()
         response.status_code = 200
-        response.json.return_value = {"content": encoded}
+        response.text = content
         response.headers = {"X-RateLimit-Remaining": "100"}
         response.raise_for_status = MagicMock()
 

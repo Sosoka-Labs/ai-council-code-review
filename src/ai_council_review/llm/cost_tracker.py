@@ -23,6 +23,8 @@ _DEFAULT_PRICING: dict[str, tuple[float, float]] = {
     "gpt-4o": (5.00, 15.00),
     "gpt-4o-mini": (0.15, 0.60),
     "claude-3-5-sonnet": (3.00, 12.00),
+    "claude-sonnet-4-20250514": (3.00, 15.00),
+    "claude-3-5-haiku": (0.80, 4.00),
     "claude-3-haiku": (0.25, 1.25),
 }
 
@@ -144,8 +146,12 @@ class CostTracker:
             return _DEFAULT_PRICING["gpt-4o-mini"]
         if "gpt-4o" in model:
             return _DEFAULT_PRICING["gpt-4o"]
+        if "claude-sonnet-4" in model:
+            return _DEFAULT_PRICING["claude-sonnet-4-20250514"]
         if "claude-3-5-sonnet" in model:
             return _DEFAULT_PRICING["claude-3-5-sonnet"]
+        if "claude-3-5-haiku" in model:
+            return _DEFAULT_PRICING["claude-3-5-haiku"]
         if "claude-3-haiku" in model:
             return _DEFAULT_PRICING["claude-3-haiku"]
 

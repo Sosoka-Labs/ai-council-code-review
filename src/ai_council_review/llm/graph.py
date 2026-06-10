@@ -6,10 +6,9 @@ import os
 from typing import Any
 
 import structlog
-from langgraph.graph import END, StateGraph
+from langgraph.graph import END, START, StateGraph
 
 from ai_council_review.config import AgentConfig, CouncilConfig
-from ai_council_review.github.browser import RepositoryBrowser
 from ai_council_review.github.client import GitHubClient
 from ai_council_review.github.ingestor import PRIngestor
 from ai_council_review.github.publisher import Publisher
@@ -162,7 +161,7 @@ def security_node(
         return {}
 
     callbacks = _make_cost_callback(cost_tracker, "security", config)
-    findings = run_security_agent(state, config, None, callbacks=callbacks)
+    findings = run_security_agent(state, config, callbacks=callbacks)
     return {
         "agent_outputs": {"security": findings},
     }
@@ -187,7 +186,7 @@ def quality_node(
         return {}
 
     callbacks = _make_cost_callback(cost_tracker, "quality", config)
-    findings = run_quality_agent(state, config, None, callbacks=callbacks)
+    findings = run_quality_agent(state, config, callbacks=callbacks)
     return {
         "agent_outputs": {"quality": findings},
     }
@@ -212,7 +211,7 @@ def architecture_node(
         return {}
 
     callbacks = _make_cost_callback(cost_tracker, "architecture", config)
-    findings = run_architecture_agent(state, config, None, callbacks=callbacks)
+    findings = run_architecture_agent(state, config, callbacks=callbacks)
     return {
         "agent_outputs": {"architecture": findings},
     }
@@ -398,20 +397,6 @@ def post_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
     }
 
 
-def _get_browser() -> RepositoryBrowser | None:
-    """Create a RepositoryBrowser if GitHub token is available.
-
-    Returns:
-        RepositoryBrowser or None.
-    """
-    token = os.environ.get("GITHUB_TOKEN")
-    repo = os.environ.get("GITHUB_REPOSITORY", "")
-    if token and repo:
-        client = GitHubClient(token, repo)
-        return RepositoryBrowser(github_client=client)
-    return None
-
-
 def _route_from_router(state: ReviewState) -> list[str]:
     """Determine which agents to run based on router output.
 
@@ -421,9 +406,8 @@ def _route_from_router(state: ReviewState) -> list[str]:
     Returns:
         List of agent node names to execute.
     """
-    agents = getattr(state, "agents_needed", ["security", "quality", "architecture"])
     valid_agents = {"security", "quality", "architecture"}
-    return [a for a in agents if a in valid_agents]
+    return [a for a in state.agents_needed if a in valid_agents]
 
 
 def build_graph(config: CouncilConfig) -> Any:
@@ -450,15 +434,14 @@ def build_graph(config: CouncilConfig) -> Any:
     workflow.add_node("post", lambda state: post_node(state, config))
 
     # Edges
-    workflow.set_entry_point("ingest")
+    workflow.add_edge(START, "ingest")
     workflow.add_edge("ingest", "router")
 
-    # Conditional routing from router
-    # Run all agents in parallel. In the future, we could use Send() for
-    # dynamic conditional routing based on the router output.
+    # Conditional routing from router — agents are selected dynamically
+    # based on the router's agents_needed output.
     workflow.add_conditional_edges(
         "router",
-        lambda state: ["security", "quality", "architecture"],  # type: ignore[arg-type]
+        _route_from_router,
         ["security", "quality", "architecture"],
     )
 

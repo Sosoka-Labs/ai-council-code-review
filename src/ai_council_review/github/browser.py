@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import subprocess
 from pathlib import Path
 from typing import Any, cast
@@ -118,8 +119,6 @@ class RepositoryBrowser:
                 check=True,
             )
             all_files = [line.strip() for line in result.stdout.strip().split("\n") if line.strip()]
-            import fnmatch
-
             return [f for f in all_files if fnmatch.fnmatch(f, pattern)]
         except subprocess.CalledProcessError:
             return []

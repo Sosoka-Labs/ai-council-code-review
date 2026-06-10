@@ -2,6 +2,25 @@
 
 Thank you for your interest in contributing! This document covers the basics of getting started.
 
+## Prerequisites
+
+- Python 3.11+
+- [uv](https://docs.astral.sh/uv/) — the project's package manager (`curl -LsSf https://astral.sh/uv/install.sh | sh`)
+
+## Environment Setup
+
+Create a `.env` file in the project root (it is gitignored) with at least one provider API key:
+
+```bash
+# .env — NEVER commit this file
+GITHUB_TOKEN=ghp_xxxxxxxx        # Required for GitHub API calls
+FIREWORKS_API_KEY=fw-xxxxxxxx    # At least one provider key is required
+# OPENAI_API_KEY=sk-xxxxxxxx
+# ANTHROPIC_API_KEY=sk-ant-xxxxxxxx
+```
+
+For a full list of environment variables and configuration options, see [AGENTS.md](AGENTS.md).
+
 ## Getting Started
 
 1. Fork the repository and clone your fork.

@@ -26,3 +26,9 @@ class TestFileStatus:
         assert FileStatus.REMOVED == "removed"
         assert FileStatus.MODIFIED == "modified"
         assert FileStatus.RENAMED == "renamed"
+
+    def test_file_status_copied(self) -> None:
+        assert FileStatus("copied") == FileStatus.COPIED
+
+    def test_file_status_unchanged(self) -> None:
+        assert FileStatus("unchanged") == FileStatus.UNCHANGED

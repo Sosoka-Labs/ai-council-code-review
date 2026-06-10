@@ -8,8 +8,8 @@ import structlog
 from langchain_core.runnables import Runnable
 
 from ai_council_review.config import AgentConfig, CouncilConfig
-from ai_council_review.github.browser import RepositoryBrowser
-from ai_council_review.llm.agents.parsing import parse_findings
+from ai_council_review.exceptions import BudgetExceededError
+from ai_council_review.llm.agents.output_models import FindingList
 from ai_council_review.llm.prompts.loader import load_prompt
 from ai_council_review.llm.providers.factory import LLMProviderFactory
 from ai_council_review.models import Finding, ReviewState
@@ -53,13 +53,11 @@ def _build_agent_variables(state: ReviewState) -> dict[str, Any]:
 
 def build_security_chain(
     config: CouncilConfig,
-    browser: RepositoryBrowser | None,
 ) -> Runnable[dict[str, Any], Any]:
     """Build a simple LLM chain for the security agent.
 
     Args:
         config: Global council configuration.
-        browser: Repository browser (unused, kept for API compatibility).
 
     Returns:
         Configured Runnable chain.
@@ -67,13 +65,12 @@ def build_security_chain(
     agent_config = config.agents.get("security", AgentConfig())
     llm = LLMProviderFactory.from_config(agent_config, config.providers)
     prompt = load_prompt("security")
-    return prompt | llm
+    return prompt | llm.with_structured_output(FindingList)
 
 
 def run_security_agent(
     state: ReviewState,
     config: CouncilConfig,
-    browser: RepositoryBrowser | None,
     callbacks: list[Any] | None = None,
 ) -> list[Finding]:
     """Run the security agent and return findings.
@@ -81,25 +78,25 @@ def run_security_agent(
     Args:
         state: Current review state.
         config: Council configuration.
-        browser: Repository browser.
         callbacks: Optional LangChain callbacks (e.g., CostCallbackHandler).
 
     Returns:
         List of findings.
     """
     logger.info("Security agent starting")
-    chain = build_security_chain(config, browser)
+    chain = build_security_chain(config)
 
     try:
         variables = _build_agent_variables(state)
         run_config = {"callbacks": callbacks} if callbacks else None
-        message = chain.invoke(variables, config=run_config)  # type: ignore[arg-type]
-        output = message.content if hasattr(message, "content") else str(message)
-        findings = parse_findings(output, agent_name="security", logger=logger)
+        result = chain.invoke(variables, config=run_config)  # type: ignore[arg-type]
+        findings = result.findings if isinstance(result, FindingList) else []
+        for f in findings:
+            f.agent = "security"
         logger.info("Security agent finished", findings=len(findings))
-        if not findings:
-            logger.info("Security agent raw output", raw_output=output)
         return findings
+    except BudgetExceededError:
+        raise
     except Exception as e:
         logger.error("Security agent failed", error=str(e))
         return []

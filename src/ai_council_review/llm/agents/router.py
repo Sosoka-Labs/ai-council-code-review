@@ -68,15 +68,7 @@ def build_router_chain(config: CouncilConfig) -> Any:
     Returns:
         Runnable chain that outputs RouterOutput.
     """
-    agent_config = config.agents.get("router", None)
-    if agent_config is None:
-        agent_config = AgentConfig(
-            enabled=True,
-            model="fireworks",
-            model_name="accounts/fireworks/routers/kimi-k2p6-turbo",
-            temperature=0.1,
-            max_tokens=2000,
-        )
+    agent_config = config.agents.get("router", AgentConfig(temperature=0.1, max_tokens=2000))
 
     llm = LLMProviderFactory.from_config(agent_config, config.providers)
     prompt = load_prompt("router")

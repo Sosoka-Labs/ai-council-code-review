@@ -45,6 +45,10 @@ class TestLLMProviderFactory:
         assert model is not None
 
     def test_provider_name_case_insensitive(self) -> None:
-        """Test that provider name is case-insensitive."""
-        with pytest.raises(LLMProviderError):
-            LLMProviderFactory.create("FIREWORKS")
+        """Test that uppercase provider name is lowercased and resolves correctly."""
+        model = LLMProviderFactory.create(
+            "FIREWORKS",
+            model_name="accounts/fireworks/models/llama-v3p1-70b-instruct",
+            api_key="invalid-key",
+        )
+        assert model is not None

@@ -8,6 +8,7 @@ import structlog
 from langchain.agents import AgentExecutor, create_tool_calling_agent
 
 from ai_council_review.config import AgentConfig, CouncilConfig
+from ai_council_review.exceptions import BudgetExceededError, ConfigError
 from ai_council_review.github.browser import RepositoryBrowser
 from ai_council_review.llm.agents.parsing import parse_findings
 from ai_council_review.llm.prompts.loader import load_prompt
@@ -67,6 +68,15 @@ def build_generalist_executor(
     """
     agent_config = config.agents.get("generalist", AgentConfig())
     llm = LLMProviderFactory.from_config(agent_config, config.providers)
+
+    if getattr(agent_config, "provider", "").lower() == "anthropic":
+        raise ConfigError(
+            "The generalist agent uses OpenAI-style tool calling and is not compatible "
+            "with Anthropic models. Use the council mode (security/quality/architecture "
+            "agents) with Anthropic, or switch the generalist agent to a Fireworks or "
+            "OpenAI model."
+        )
+
     tools = make_repository_tools(browser)
     prompt = load_prompt("generalist")
 
@@ -108,6 +118,8 @@ def run_generalist_agent(
         if not findings:
             logger.info("Generalist agent raw output", raw_output=result["output"])
         return findings
+    except BudgetExceededError:
+        raise
     except Exception as e:
         logger.error("Generalist agent failed", error=str(e))
         return []

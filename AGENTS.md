@@ -383,5 +383,5 @@ Repository browser tools live in `src/ai_council_review/llm/tools/` (LangChain `
 ---
 
 *Document version: 1.0*
-*Date: 2026-06-02*
+*Date: 2026-06-09*
 *Status: Living document — update when conventions change*
