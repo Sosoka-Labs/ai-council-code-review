@@ -83,10 +83,14 @@ def _normalize_finding(item: dict[str, Any]) -> dict[str, Any]:
 
     if "severity" in item:
         raw = str(item["severity"]).lower()
-        normalized["severity"] = _SEVERITY_ALIASES.get(raw, raw) if raw not in _VALID_SEVERITIES else raw
+        normalized["severity"] = (
+            _SEVERITY_ALIASES.get(raw, raw) if raw not in _VALID_SEVERITIES else raw
+        )
     elif "level" in item:
         raw = str(item["level"]).lower()
-        normalized["severity"] = _SEVERITY_ALIASES.get(raw, raw) if raw not in _VALID_SEVERITIES else raw
+        normalized["severity"] = (
+            _SEVERITY_ALIASES.get(raw, raw) if raw not in _VALID_SEVERITIES else raw
+        )
     else:
         normalized["severity"] = "medium"
 

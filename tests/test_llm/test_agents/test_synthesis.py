@@ -110,9 +110,7 @@ class TestRunSynthesisAgent:
         mock_chain.invoke.return_value = mock_message
 
         state = _make_state(
-            agent_outputs={
-                "security": [_make_finding(severity="high", category="security")]
-            }
+            agent_outputs={"security": [_make_finding(severity="high", category="security")]}
         )
 
         with patch(

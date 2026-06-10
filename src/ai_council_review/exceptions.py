@@ -49,4 +49,3 @@ class BudgetExceededError(AICouncilError):
     """Review budget exceeded."""
 
     pass
-

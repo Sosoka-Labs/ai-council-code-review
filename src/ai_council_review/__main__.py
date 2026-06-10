@@ -147,7 +147,11 @@ def main() -> int:
         state.skip_reason = skip_reason
         state.changed_files = files
 
-        logger.info("PR metadata", head_sha=pr.head_sha if pr else None, base_sha=pr.base_sha if pr else None)
+        logger.info(
+            "PR metadata",
+            head_sha=pr.head_sha if pr else None,
+            base_sha=pr.base_sha if pr else None,
+        )
 
         if skipped:
             logger.info("Skipping PR", pr=args.pr_number, reason=skip_reason)

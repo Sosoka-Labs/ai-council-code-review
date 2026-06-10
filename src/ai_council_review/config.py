@@ -117,7 +117,9 @@ def load_config(config_path: str | Path | None = None) -> CouncilConfig:
         FileNotFoundError: If the config file is specified but not found.
     """
     explicit_path = config_path is not None
-    config_path = Path(config_path) if config_path is not None else Path.cwd() / ".ai-council" / "config.yaml"
+    config_path = (
+        Path(config_path) if config_path is not None else Path.cwd() / ".ai-council" / "config.yaml"
+    )
 
     data: dict[str, Any] = {}
 

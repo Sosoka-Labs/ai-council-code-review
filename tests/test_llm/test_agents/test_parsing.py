@@ -18,7 +18,7 @@ class TestExtractFirstJsonArray:
         assert result == '[{"path": "foo.py", "line": 1}]'
 
     def test_extracts_only_first_array_when_multiple_present(self) -> None:
-        text = '[1, 2, 3] and then [4, 5, 6]'
+        text = "[1, 2, 3] and then [4, 5, 6]"
         result = _extract_first_json_array(text)
         assert result == "[1, 2, 3]"
 
@@ -29,7 +29,7 @@ class TestExtractFirstJsonArray:
         assert _extract_first_json_array("") is None
 
     def test_handles_nested_arrays(self) -> None:
-        text = '[[1, 2], [3, 4]]'
+        text = "[[1, 2], [3, 4]]"
         assert _extract_first_json_array(text) == "[[1, 2], [3, 4]]"
 
     def test_bracket_inside_string_not_counted_as_depth(self) -> None:

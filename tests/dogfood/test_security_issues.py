@@ -69,6 +69,7 @@ def unused_function():  # type: ignore[no-untyped-def]
 
 # ── New planted issues (added for OpenAI pipeline test) ─────────────────────
 
+
 # Security issue 5: Path traversal — user-controlled path joined without validation
 def read_user_file(username: str) -> str:
     """Return contents of a user's profile file."""
