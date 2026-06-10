@@ -100,7 +100,6 @@ exclude = [
 module = [
     "github.*",
     "langgraph.*",
-    "langchain.*",
     "structlog.*",
 ]
 ignore_missing_imports = true

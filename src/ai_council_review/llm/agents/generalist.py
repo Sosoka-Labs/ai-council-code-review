@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import structlog
-from langchain_core.runnables import Runnable
+from langchain_core.runnables import Runnable, RunnableConfig
 
 from ai_council_review.config import AgentConfig, CouncilConfig
 from ai_council_review.exceptions import BudgetExceededError
@@ -55,7 +55,7 @@ def _build_agent_variables(state: ReviewState) -> dict[str, Any]:
 def build_generalist_executor(
     config: CouncilConfig,
     browser: RepositoryBrowser | None,  # noqa: ARG001
-) -> Runnable:
+) -> Runnable[dict[str, Any], Any]:
     """Build a prompt | llm chain for the generalist agent.
 
     Args:
@@ -93,7 +93,7 @@ def run_generalist_agent(
 
     try:
         variables = _build_agent_variables(state)
-        run_config: dict[str, Any] = {"callbacks": callbacks} if callbacks else {}
+        run_config: RunnableConfig | None = {"callbacks": callbacks} if callbacks else None
         result = chain.invoke(variables, config=run_config)
         output: str = result.content if hasattr(result, "content") else str(result)
         findings = parse_findings(output, agent_name="generalist", logger=logger)
