@@ -20,7 +20,7 @@ AI Council reviews every pull request with a team of specialist agents:
 | **Agent-attributed comments** | Every inline comment is tagged with the agent name and confidence score |
 | **Cost-controlled** | Configurable per-PR budget ($5.00 default); skip on forks by default |
 | **Graceful degradation** | One agent failure does not crash the workflow; others continue |
-| **Multi-provider** | Fireworks.ai (default), OpenAI, and Anthropic are supported; the council mode (security/quality/architecture agents) supports all three providers, while the generalist agent requires Fireworks or OpenAI |
+| **Multi-provider** | Fireworks.ai (default), OpenAI, and Anthropic — all agents support all three providers |
 | **Stateless** | No persistence, no vector store, no database — just the GitHub API and smart prompts |
 
 **Why this matters:**

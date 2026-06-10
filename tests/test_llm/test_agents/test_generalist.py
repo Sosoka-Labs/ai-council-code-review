@@ -7,8 +7,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ai_council_review.config import AgentConfig, CouncilConfig
-from ai_council_review.exceptions import BudgetExceededError, ConfigError
+from ai_council_review.config import CouncilConfig
+from ai_council_review.exceptions import BudgetExceededError
 from ai_council_review.llm.agents.generalist import (
     build_generalist_executor,
     run_generalist_agent,
@@ -59,66 +59,32 @@ def _valid_findings_json() -> str:
 class TestBuildGeneralistExecutor:
     """Tests for build_generalist_executor."""
 
-    def test_build_generalist_executor_raises_on_anthropic(self) -> None:
-        """ConfigError is raised when the agent_config has provider attribute set to anthropic.
-
-        Note: AgentConfig has no `provider` field — the guard checks
-        `getattr(agent_config, "provider", "")`. To trigger it we must inject
-        a config object that exposes `provider = "anthropic"`.
-        """
+    def test_build_generalist_executor_returns_runnable(self) -> None:
+        """Chain builds successfully for any provider (all providers supported)."""
         mock_llm = MagicMock()
 
-        # Inject an agent_config with provider="anthropic" via a mock
-        mock_agent_config = MagicMock(spec=AgentConfig)
-        mock_agent_config.provider = "anthropic"
-
-        config = CouncilConfig()
-        config.agents["generalist"] = mock_agent_config  # type: ignore[assignment]
-
-        with (
-            patch(
-                "ai_council_review.llm.agents.generalist.LLMProviderFactory.from_config",
-                return_value=mock_llm,
-            ),
-            pytest.raises(ConfigError, match="not compatible with Anthropic"),
+        with patch(
+            "ai_council_review.llm.agents.generalist.LLMProviderFactory.from_config",
+            return_value=mock_llm,
         ):
-            build_generalist_executor(config, None)
+            chain = build_generalist_executor(CouncilConfig(), None)
 
-    def test_build_generalist_executor_succeeds_for_non_anthropic(self) -> None:
-        """Executor builds successfully when provider is not anthropic."""
-        mock_llm = MagicMock()
-        mock_executor = MagicMock()
-
-        with (
-            patch(
-                "ai_council_review.llm.agents.generalist.LLMProviderFactory.from_config",
-                return_value=mock_llm,
-            ),
-            patch(
-                "ai_council_review.llm.agents.generalist.create_tool_calling_agent",
-                return_value=MagicMock(),
-            ),
-            patch(
-                "ai_council_review.llm.agents.generalist.AgentExecutor",
-                return_value=mock_executor,
-            ),
-        ):
-            executor = build_generalist_executor(CouncilConfig(), None)
-
-        assert executor is mock_executor
+        assert chain is not None
 
 
 class TestRunGeneralistAgent:
     """Tests for run_generalist_agent."""
 
     def test_run_generalist_agent_parses_output(self) -> None:
-        """Mock executor returns valid findings JSON; verify Finding list returned."""
-        mock_executor = MagicMock()
-        mock_executor.invoke.return_value = {"output": _valid_findings_json()}
+        """Mock chain returns AIMessage with valid findings JSON; verify Finding list."""
+        mock_result = MagicMock()
+        mock_result.content = _valid_findings_json()
+        mock_chain = MagicMock()
+        mock_chain.invoke.return_value = mock_result
 
         with patch(
             "ai_council_review.llm.agents.generalist.build_generalist_executor",
-            return_value=mock_executor,
+            return_value=mock_chain,
         ):
             findings = run_generalist_agent(_make_state(), CouncilConfig(), None)
 
@@ -131,13 +97,15 @@ class TestRunGeneralistAgent:
         assert finding.agent == "generalist"
 
     def test_run_generalist_agent_returns_empty_on_bad_output(self) -> None:
-        """Mock executor returns non-JSON; verify empty list with no crash."""
-        mock_executor = MagicMock()
-        mock_executor.invoke.return_value = {"output": "Looks good to me, no issues."}
+        """Mock chain returns non-JSON content; verify empty list with no crash."""
+        mock_result = MagicMock()
+        mock_result.content = "Looks good to me, no issues."
+        mock_chain = MagicMock()
+        mock_chain.invoke.return_value = mock_result
 
         with patch(
             "ai_council_review.llm.agents.generalist.build_generalist_executor",
-            return_value=mock_executor,
+            return_value=mock_chain,
         ):
             findings = run_generalist_agent(_make_state(), CouncilConfig(), None)
 
@@ -145,13 +113,13 @@ class TestRunGeneralistAgent:
 
     def test_run_generalist_agent_propagates_budget_error(self) -> None:
         """BudgetExceededError is re-raised, not swallowed."""
-        mock_executor = MagicMock()
-        mock_executor.invoke.side_effect = BudgetExceededError("over budget")
+        mock_chain = MagicMock()
+        mock_chain.invoke.side_effect = BudgetExceededError("over budget")
 
         with (
             patch(
                 "ai_council_review.llm.agents.generalist.build_generalist_executor",
-                return_value=mock_executor,
+                return_value=mock_chain,
             ),
             pytest.raises(BudgetExceededError),
         ):
