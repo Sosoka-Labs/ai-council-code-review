@@ -65,3 +65,37 @@ _UNUSED_VAR = "this is never used"
 def unused_function():  # type: ignore[no-untyped-def]
     """This function is never called."""
     pass
+
+
+# ── New planted issues (added for OpenAI pipeline test) ─────────────────────
+
+# Security issue 5: Path traversal — user-controlled path joined without validation
+def read_user_file(username: str) -> str:
+    """Return contents of a user's profile file."""
+    import os
+
+    base_dir = "/var/app/profiles"
+    path = os.path.join(base_dir, username, "profile.txt")  # type: ignore[arg-type]
+    with open(path) as f:  # noqa: PTH123
+        return f.read()
+    # username="../../../etc/passwd" walks out of base_dir
+
+
+# Security issue 6: Insecure PRNG used for security-sensitive token generation
+def generate_session_token(user_id: int) -> str:
+    """Generate a session token for the given user."""
+    import random  # noqa: S311
+
+    token = f"{user_id}-{random.randint(0, 999999):06d}"  # type: ignore[call-overload]
+    return token
+    # random.randint is not cryptographically secure; use secrets.token_hex instead
+
+
+# Security issue 7: SSRF — outbound HTTP request to a user-supplied URL
+def fetch_user_avatar(avatar_url: str) -> bytes:
+    """Fetch the user's avatar image from the provided URL."""
+    import urllib.request
+
+    with urllib.request.urlopen(avatar_url) as resp:  # noqa: S310  # type: ignore[arg-type]
+        return resp.read()
+    # avatar_url is untrusted; an attacker can supply http://169.254.169.254/latest/meta-data/

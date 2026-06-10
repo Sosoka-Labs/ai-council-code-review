@@ -1,0 +1,69 @@
+# AI Council — OpenAI pipeline test configuration
+# All agents routed to OpenAI. gpt-4o-mini for cheap classification nodes,
+# gpt-4o for specialist reviewers.
+
+version: "1"
+
+review_depth: standard
+max_files: 60
+max_lines: 3000
+max_diff_size: 150000
+comment_on_forks: false
+skip_drafts: true
+skip_labels:
+  - "skip-ai-review"
+  - "wip"
+skip_patterns:
+  - "package-lock.json"
+  - "yarn.lock"
+  - "poetry.lock"
+  - "*.snap"
+  - "dist/"
+  - "build/"
+  - "node_modules/"
+  - "**/*.pyc"
+
+budget_usd: 5.00
+agent_timeout_seconds: 300
+total_timeout_seconds: 600
+debug: true
+
+agents:
+  router:
+    enabled: true
+    model: openai
+    model_name: openai/gpt-4o-mini
+    temperature: 0.1
+    max_tokens: 2000
+
+  security:
+    enabled: true
+    model: openai
+    model_name: openai/gpt-4o
+    temperature: 0.2
+    max_tokens: 16000
+
+  quality:
+    enabled: true
+    model: openai
+    model_name: openai/gpt-4o
+    temperature: 0.3
+    max_tokens: 16000
+
+  architecture:
+    enabled: true
+    model: openai
+    model_name: openai/gpt-4o
+    temperature: 0.3
+    max_tokens: 16000
+
+  synthesis:
+    enabled: true
+    model: openai
+    model_name: openai/gpt-4o-mini
+    temperature: 0.2
+    max_tokens: 16000
+
+providers:
+  openai:
+    api_key: null
