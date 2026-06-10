@@ -66,6 +66,7 @@ class TestMainSuccess:
 
         monkeypatch.setattr(sys, "argv", _GRAPH_ARGV)
         monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test-key")
+        monkeypatch.delenv("GITHUB_EVENT_PATH", raising=False)
 
         with (
             patch("ai_council_review.__main__.build_graph", return_value=mock_graph),
@@ -99,6 +100,7 @@ class TestMainGraphException:
 
         monkeypatch.setattr(sys, "argv", _GRAPH_ARGV)
         monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test-key")
+        monkeypatch.delenv("GITHUB_EVENT_PATH", raising=False)
 
         with (
             patch("ai_council_review.__main__.build_graph", return_value=mock_graph),
@@ -129,6 +131,7 @@ class TestMainTimeout:
         """Return 1 when the graph thread is still alive after the timeout."""
         monkeypatch.setattr(sys, "argv", _GRAPH_ARGV)
         monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test-key")
+        monkeypatch.delenv("GITHUB_EVENT_PATH", raising=False)
 
         # Simulate a thread that never finishes: is_alive() always returns True
         never_finishing_thread = MagicMock(spec=threading.Thread)
