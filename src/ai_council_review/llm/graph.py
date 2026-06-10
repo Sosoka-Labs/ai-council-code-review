@@ -133,6 +133,7 @@ def _make_cost_callback(
     if cost_tracker is None:
         return None
     agent_config = config.agents.get(agent_name, AgentConfig())
+    assert agent_config.model_name is not None  # guaranteed by AgentConfig validator
     handler = CostCallbackHandler(
         cost_tracker=cost_tracker,
         agent_name=agent_name,

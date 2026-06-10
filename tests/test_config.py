@@ -28,6 +28,36 @@ class TestAgentConfig:
         assert config.temperature == 0.3
         assert config.max_tokens == 16000
 
+    def test_model_name_default_for_fireworks(self) -> None:
+        """Provider default fills in when model_name is not specified."""
+        config = AgentConfig(model="fireworks")
+        assert config.model_name == "accounts/fireworks/routers/kimi-k2p6-turbo"
+
+    def test_model_name_default_for_openai(self) -> None:
+        """OpenAI provider gets gpt-4o-mini default when model_name omitted."""
+        config = AgentConfig(model="openai")
+        assert config.model_name == "gpt-4o-mini"
+
+    def test_model_name_default_for_anthropic(self) -> None:
+        """Anthropic provider gets a haiku default when model_name omitted."""
+        config = AgentConfig(model="anthropic")
+        assert config.model_name == "claude-3-5-haiku-20241022"
+
+    def test_explicit_model_name_overrides_default(self) -> None:
+        """User-supplied model_name is respected even when a default exists."""
+        config = AgentConfig(model="openai", model_name="gpt-4o")
+        assert config.model_name == "gpt-4o"
+
+    def test_alias_resolution_still_works(self) -> None:
+        """Alias form is resolved to long-form model id."""
+        config = AgentConfig(model="fireworks", model_name="fireworks/llama-3.1-70b")
+        assert config.model_name == "accounts/fireworks/models/llama-v3p1-70b-instruct"
+
+    def test_unknown_provider_raises_when_model_name_missing(self) -> None:
+        """A provider without a default and no model_name yields a clear error."""
+        with pytest.raises(ValidationError, match="No default model_name"):
+            AgentConfig(model="unknown-provider")
+
 
 class TestCouncilConfig:
     """Tests for CouncilConfig model."""

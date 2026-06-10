@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 CANONICAL_AGENTS: list[str] = ["router", "security", "quality", "architecture", "synthesis"]
@@ -23,6 +23,14 @@ MODEL_ALIASES: dict[str, str] = {
     "anthropic/claude-haiku": "claude-3-5-haiku-20241022",
 }
 
+# One sensible default per provider, used when the user picks a provider but
+# does not specify a model_name. Users remain free to override on any agent.
+DEFAULT_MODELS_BY_PROVIDER: dict[str, str] = {
+    "fireworks": "accounts/fireworks/routers/kimi-k2p6-turbo",
+    "openai": "gpt-4o-mini",
+    "anthropic": "claude-3-5-haiku-20241022",
+}
+
 _BARE_ENV_VARS: dict[str, str] = {
     "fireworks": "FIREWORKS_API_KEY",
     "openai": "OPENAI_API_KEY",
@@ -31,19 +39,41 @@ _BARE_ENV_VARS: dict[str, str] = {
 
 
 class AgentConfig(BaseModel):
-    """Configuration for a single agent."""
+    """Configuration for a single agent.
+
+    ``model`` is the provider name (fireworks, openai, anthropic).
+    ``model_name`` is the model identifier. If unset, a sensible default for the
+    chosen provider is filled in from DEFAULT_MODELS_BY_PROVIDER — users are
+    encouraged to override per agent.
+    """
 
     enabled: bool = True
     model: str = "fireworks"
-    model_name: str = "accounts/fireworks/routers/kimi-k2p6-turbo"
+    model_name: str | None = None
     temperature: float = 0.3
     max_tokens: int = 16000
     system_prompt: str | None = None
 
     @field_validator("model_name", mode="before")
     @classmethod
-    def _resolve_alias(cls, value: str) -> str:
+    def _resolve_alias(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         return MODEL_ALIASES.get(value, value)
+
+    @model_validator(mode="after")
+    def _fill_default_model_name(self) -> AgentConfig:
+        if self.model_name is None:
+            provider = self.model.lower()
+            default = DEFAULT_MODELS_BY_PROVIDER.get(provider)
+            if default is None:
+                raise ValueError(
+                    f"No default model_name available for provider '{self.model}'. "
+                    f"Set model_name explicitly. Supported providers with defaults: "
+                    f"{sorted(DEFAULT_MODELS_BY_PROVIDER)}."
+                )
+            self.model_name = default
+        return self
 
 
 class ProviderConfig(BaseModel):

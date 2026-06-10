@@ -29,13 +29,15 @@ total_timeout_seconds: 600
 debug: true
 
 agents:
+  # router and synthesis use the OpenAI provider default (gpt-4o-mini) —
+  # cheap, fast classification. Omitting model_name keeps the config terse.
   router:
     enabled: true
     model: openai
-    model_name: openai/gpt-4o-mini
     temperature: 0.1
     max_tokens: 2000
 
+  # Specialists pick a stronger model explicitly.
   security:
     enabled: true
     model: openai
@@ -60,7 +62,6 @@ agents:
   synthesis:
     enabled: true
     model: openai
-    model_name: openai/gpt-4o-mini
     temperature: 0.2
     max_tokens: 16000
 
