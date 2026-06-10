@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 from typing import Any
 
 import structlog
@@ -11,6 +10,49 @@ import structlog
 from ai_council_review.models import Finding
 
 logger = structlog.get_logger()
+
+_SEVERITY_ALIASES: dict[str, str] = {
+    "warning": "medium",
+    "error": "high",
+    "blocker": "critical",
+    "info": "low",
+    "note": "low",
+}
+
+_VALID_SEVERITIES = {"critical", "high", "medium", "low", "info"}
+
+
+def _extract_first_json_array(text: str) -> str | None:
+    """Extract the first balanced JSON array using brace counting.
+
+    Unlike a greedy regex, this correctly handles nested arrays and is not
+    susceptible to adversarial input that contains multiple ``[...]`` spans.
+    """
+    start = text.find("[")
+    if start == -1:
+        return None
+    depth = 0
+    in_string = False
+    escape_next = False
+    for i, ch in enumerate(text[start:], start=start):
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == "\\" and in_string:
+            escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None
 
 
 def _normalize_finding(item: dict[str, Any]) -> dict[str, Any]:
@@ -40,9 +82,15 @@ def _normalize_finding(item: dict[str, Any]) -> dict[str, Any]:
     # the correct diff position from the file line number and the patch.
 
     if "severity" in item:
-        normalized["severity"] = str(item["severity"]).lower()
+        raw = str(item["severity"]).lower()
+        normalized["severity"] = (
+            _SEVERITY_ALIASES.get(raw, raw) if raw not in _VALID_SEVERITIES else raw
+        )
     elif "level" in item:
-        normalized["severity"] = str(item["level"]).lower()
+        raw = str(item["level"]).lower()
+        normalized["severity"] = (
+            _SEVERITY_ALIASES.get(raw, raw) if raw not in _VALID_SEVERITIES else raw
+        )
     else:
         normalized["severity"] = "medium"
 
@@ -70,6 +118,8 @@ def _normalize_finding(item: dict[str, Any]) -> dict[str, Any]:
 
 def parse_findings(text: str, agent_name: str | None = None, logger: Any = None) -> list[Finding]:
     """Parse findings from agent output string.
+
+    Used by generalist agent only. Specialist agents use with_structured_output().
 
     Handles markdown code blocks, extra text, and extracts JSON arrays.
     Normalizes common field name variations from different LLM outputs.
@@ -114,9 +164,9 @@ def parse_findings(text: str, agent_name: str | None = None, logger: Any = None)
 
     # Try to extract the first JSON array from the text
     try:
-        match = re.search(r"\[.*\]", text, re.DOTALL)
-        if match:
-            data = json.loads(match.group(0))
+        extracted = _extract_first_json_array(text)
+        if extracted:
+            data = json.loads(extracted)
             if isinstance(data, list):
                 findings = []
                 for item in data:

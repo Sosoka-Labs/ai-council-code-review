@@ -7,8 +7,10 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+CANONICAL_AGENTS: list[str] = ["router", "security", "quality", "architecture", "synthesis"]
 
 MODEL_ALIASES: dict[str, str] = {
     "fireworks/llama-3.1-70b": "accounts/fireworks/models/llama-v3p1-70b-instruct",
@@ -18,7 +20,15 @@ MODEL_ALIASES: dict[str, str] = {
     "openai/gpt-4.1": "gpt-4.1",
     "openai/gpt-4.1-mini": "gpt-4.1-mini",
     "anthropic/claude-sonnet": "claude-sonnet-4-20250514",
-    "anthropic/claude-haiku": "claude-3-haiku-20240307",
+    "anthropic/claude-haiku": "claude-3-5-haiku-20241022",
+}
+
+# One sensible default per provider, used when the user picks a provider but
+# does not specify a model_name. Users remain free to override on any agent.
+DEFAULT_MODELS_BY_PROVIDER: dict[str, str] = {
+    "fireworks": "accounts/fireworks/routers/kimi-k2p6-turbo",
+    "openai": "gpt-4o-mini",
+    "anthropic": "claude-3-5-haiku-20241022",
 }
 
 _BARE_ENV_VARS: dict[str, str] = {
@@ -29,19 +39,41 @@ _BARE_ENV_VARS: dict[str, str] = {
 
 
 class AgentConfig(BaseModel):
-    """Configuration for a single agent."""
+    """Configuration for a single agent.
+
+    ``model`` is the provider name (fireworks, openai, anthropic).
+    ``model_name`` is the model identifier. If unset, a sensible default for the
+    chosen provider is filled in from DEFAULT_MODELS_BY_PROVIDER — users are
+    encouraged to override per agent.
+    """
 
     enabled: bool = True
     model: str = "fireworks"
-    model_name: str = "accounts/fireworks/routers/kimi-k2p6-turbo"
+    model_name: str | None = None
     temperature: float = 0.3
     max_tokens: int = 16000
     system_prompt: str | None = None
 
     @field_validator("model_name", mode="before")
     @classmethod
-    def _resolve_alias(cls, value: str) -> str:
+    def _resolve_alias(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         return MODEL_ALIASES.get(value, value)
+
+    @model_validator(mode="after")
+    def _fill_default_model_name(self) -> AgentConfig:
+        if self.model_name is None:
+            provider = self.model.lower()
+            default = DEFAULT_MODELS_BY_PROVIDER.get(provider)
+            if default is None:
+                raise ValueError(
+                    f"No default model_name available for provider '{self.model}'. "
+                    f"Set model_name explicitly. Supported providers with defaults: "
+                    f"{sorted(DEFAULT_MODELS_BY_PROVIDER)}."
+                )
+            self.model_name = default
+        return self
 
 
 class ProviderConfig(BaseModel):
@@ -73,6 +105,7 @@ class CouncilConfig(BaseModel):
             "dist/",
             "build/",
             "node_modules/",
+            "**/*.pyc",
         ]
     )
     budget_usd: float = 5.0
@@ -113,16 +146,22 @@ def load_config(config_path: str | Path | None = None) -> CouncilConfig:
         ValidationError: If the configuration is invalid.
         FileNotFoundError: If the config file is specified but not found.
     """
-    if config_path is None:
-        config_path = Path.cwd() / ".ai-council" / "config.yaml"
-    else:
-        config_path = Path(config_path)
+    explicit_path = config_path is not None
+    config_path = (
+        Path(config_path) if config_path is not None else Path.cwd() / ".ai-council" / "config.yaml"
+    )
 
     data: dict[str, Any] = {}
 
     if config_path.exists():
         with open(config_path, encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
+    elif explicit_path:
+        raise FileNotFoundError(
+            f"Config file not found: {config_path}. "
+            "Check the --config path and ensure the file exists."
+        )
+    # else: auto-discovery found nothing, use defaults silently
 
     env = EnvConfig()
     providers = data.get("providers", {})
@@ -150,16 +189,14 @@ def load_config(config_path: str | Path | None = None) -> CouncilConfig:
 def _provider_has_key(provider_name: str, provider_cfg: ProviderConfig) -> bool:
     """Check whether a provider has a usable API key.
 
-    Checks the config key, the bare env var (e.g. FIREWORKS_API_KEY),
-    and the AI_COUNCIL__ prefixed env var.
+    Checks the config key and the bare env var (e.g. FIREWORKS_API_KEY).
+    The AI_COUNCIL__-prefixed variants are resolved by EnvConfig at load time
+    and surfaced via provider_cfg.api_key, so they are covered by the first check.
     """
     if provider_cfg.api_key:
         return True
     bare_env = _BARE_ENV_VARS.get(provider_name)
-    if bare_env and os.environ.get(bare_env):
-        return True
-    prefixed_env = f"AI_COUNCIL__{bare_env}" if bare_env else None
-    return bool(prefixed_env and os.environ.get(prefixed_env))
+    return bool(bare_env and os.environ.get(bare_env))
 
 
 def validate_config(config: CouncilConfig) -> None:
@@ -175,13 +212,7 @@ def validate_config(config: CouncilConfig) -> None:
     if not enabled_agents:
         # Default agents are implicitly enabled; if the user explicitly
         # disabled everything, we still need a key for the default set.
-        enabled_agents = [
-            ("router", AgentConfig()),
-            ("security", AgentConfig()),
-            ("quality", AgentConfig()),
-            ("architecture", AgentConfig()),
-            ("synthesis", AgentConfig()),
-        ]
+        enabled_agents = [(name, AgentConfig()) for name in CANONICAL_AGENTS]
 
     missing: list[str] = []
     for name, agent_cfg in enabled_agents:

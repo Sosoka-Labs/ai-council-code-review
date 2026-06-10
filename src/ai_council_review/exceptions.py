@@ -49,9 +49,3 @@ class BudgetExceededError(AICouncilError):
     """Review budget exceeded."""
 
     pass
-
-
-class TimeoutError(AICouncilError):
-    """Agent or operation timed out."""
-
-    pass

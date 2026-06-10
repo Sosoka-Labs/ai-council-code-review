@@ -10,6 +10,7 @@ import structlog
 from pydantic import BaseModel
 
 from ai_council_review.config import AgentConfig, CouncilConfig
+from ai_council_review.exceptions import BudgetExceededError
 from ai_council_review.llm.prompts.loader import load_prompt
 from ai_council_review.llm.providers.factory import LLMProviderFactory
 from ai_council_review.models import Finding, ReviewState
@@ -116,15 +117,7 @@ def build_synthesis_chain(config: CouncilConfig) -> Any:
     Returns:
         Runnable chain that outputs string (JSON).
     """
-    agent_config = config.agents.get("synthesis", None)
-    if agent_config is None:
-        agent_config = AgentConfig(
-            enabled=True,
-            model="fireworks",
-            model_name="accounts/fireworks/routers/kimi-k2p6-turbo",
-            temperature=0.2,
-            max_tokens=16000,
-        )
+    agent_config = config.agents.get("synthesis", AgentConfig(temperature=0.2, max_tokens=16000))
 
     llm = LLMProviderFactory.from_config(agent_config, config.providers)
     prompt = load_prompt("synthesis")
@@ -144,7 +137,7 @@ def _fallback_synthesize(all_findings: list[dict[str, Any]]) -> SynthesisOutput:
     seen: set[str] = set()
     deduped: list[Finding] = []
     for f in all_findings:
-        key = f"{f['path']}:{f.get('position', 'none')}:{f['body'][:50].lower().strip()}"
+        key = f"{f['path']}:{f.get('line', 'none')}:{f['body'][:200].lower().strip()}"
         if key in seen:
             continue
         seen.add(key)
@@ -157,6 +150,7 @@ def _fallback_synthesize(all_findings: list[dict[str, Any]]) -> SynthesisOutput:
                 body=f["body"],
                 confidence=f.get("confidence", 0.8),
                 line=f.get("line"),
+                agent=f.get("agent"),
             )
         )
 
@@ -237,6 +231,8 @@ def run_synthesis_agent(
             categories=synthesis_output.categories,
         )
         return synthesis_output
+    except BudgetExceededError:
+        raise
     except Exception as e:
         logger.error("Synthesis failed", error=str(e))
         all_findings: list[dict[str, Any]] = []

@@ -20,7 +20,7 @@ AI Council reviews every pull request with a team of specialist agents:
 | **Agent-attributed comments** | Every inline comment is tagged with the agent name and confidence score |
 | **Cost-controlled** | Configurable per-PR budget ($5.00 default); skip on forks by default |
 | **Graceful degradation** | One agent failure does not crash the workflow; others continue |
-| **Multi-provider** | Fireworks.ai (default), OpenAI, and Anthropic are all first-class options |
+| **Multi-provider** | Fireworks.ai (default), OpenAI, and Anthropic — all agents support all three providers |
 | **Stateless** | No persistence, no vector store, no database — just the GitHub API and smart prompts |
 
 **Why this matters:**
@@ -44,7 +44,7 @@ name: AI Council Code Review
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    branches: [main, master, develop]
+    branches: [main]
 
 permissions:
   contents: read
@@ -228,7 +228,7 @@ AI_COUNCIL__GITHUB_TOKEN=ghp_xxxxxxxx
 
 ### Model aliases
 
-You can use shorthand names instead of full provider paths:
+You can use shorthand names instead of full provider paths. Both the alias form and the full model ID are accepted — for example, `fireworks/llama-3.1-70b` and `accounts/fireworks/models/llama-v3p1-70b-instruct` are equivalent.
 
 | Alias | Resolves to |
 |-------|-------------|

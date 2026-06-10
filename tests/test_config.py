@@ -9,9 +9,11 @@ import yaml
 from pydantic import ValidationError
 
 from ai_council_review.config import (
+    CANONICAL_AGENTS,
     AgentConfig,
     CouncilConfig,
     load_config,
+    validate_config,
 )
 
 
@@ -25,6 +27,36 @@ class TestAgentConfig:
         assert config.model == "fireworks"
         assert config.temperature == 0.3
         assert config.max_tokens == 16000
+
+    def test_model_name_default_for_fireworks(self) -> None:
+        """Provider default fills in when model_name is not specified."""
+        config = AgentConfig(model="fireworks")
+        assert config.model_name == "accounts/fireworks/routers/kimi-k2p6-turbo"
+
+    def test_model_name_default_for_openai(self) -> None:
+        """OpenAI provider gets gpt-4o-mini default when model_name omitted."""
+        config = AgentConfig(model="openai")
+        assert config.model_name == "gpt-4o-mini"
+
+    def test_model_name_default_for_anthropic(self) -> None:
+        """Anthropic provider gets a haiku default when model_name omitted."""
+        config = AgentConfig(model="anthropic")
+        assert config.model_name == "claude-3-5-haiku-20241022"
+
+    def test_explicit_model_name_overrides_default(self) -> None:
+        """User-supplied model_name is respected even when a default exists."""
+        config = AgentConfig(model="openai", model_name="gpt-4o")
+        assert config.model_name == "gpt-4o"
+
+    def test_alias_resolution_still_works(self) -> None:
+        """Alias form is resolved to long-form model id."""
+        config = AgentConfig(model="fireworks", model_name="fireworks/llama-3.1-70b")
+        assert config.model_name == "accounts/fireworks/models/llama-v3p1-70b-instruct"
+
+    def test_unknown_provider_raises_when_model_name_missing(self) -> None:
+        """A provider without a default and no model_name yields a clear error."""
+        with pytest.raises(ValidationError, match="No default model_name"):
+            AgentConfig(model="unknown-provider")
 
 
 class TestCouncilConfig:
@@ -113,6 +145,11 @@ class TestLoadConfig:
         assert config.max_files == 50
         assert config.agents == {}
 
+    def test_explicit_missing_path_raises(self) -> None:
+        """Test that an explicit path that doesn't exist raises FileNotFoundError."""
+        with pytest.raises(FileNotFoundError, match="Config file not found"):
+            load_config("/nonexistent/path/config.yaml")
+
     def test_env_config_override_existing_provider(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -126,3 +163,75 @@ class TestLoadConfig:
 
         config = load_config(config_file)
         assert config.providers["fireworks"].api_key == "new-key"
+
+
+class TestValidateConfig:
+    """Tests for validate_config function."""
+
+    def test_validate_config_raises_when_missing_api_key(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Raise ConfigError when an enabled agent's provider has no API key."""
+        from ai_council_review.exceptions import ConfigError
+
+        # Ensure none of the bare env vars are set
+        for var in ("FIREWORKS_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
+            monkeypatch.delenv(var, raising=False)
+        for var in (
+            "AI_COUNCIL__FIREWORKS_API_KEY",
+            "AI_COUNCIL__OPENAI_API_KEY",
+            "AI_COUNCIL__ANTHROPIC_API_KEY",
+        ):
+            monkeypatch.delenv(var, raising=False)
+
+        config = CouncilConfig(
+            agents={"security": AgentConfig(enabled=True, model="openai")},
+        )
+
+        with pytest.raises(ConfigError, match="No LLM API key found"):
+            validate_config(config)
+
+    def test_validate_config_passes_with_key_present(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """No exception when the enabled agent's provider has an API key."""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test-key")
+
+        config = CouncilConfig(
+            agents={"quality": AgentConfig(enabled=True, model="openai")},
+        )
+
+        # Should not raise
+        validate_config(config)
+
+    def test_validate_config_uses_canonical_agents_when_none_configured(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When no agents are configured, CANONICAL_AGENTS are used for validation.
+
+        Providing a key for the default provider (fireworks) satisfies all
+        canonical agents because AgentConfig defaults to model="fireworks".
+        """
+        # Clear any leaked keys first
+        for var in ("FIREWORKS_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
+            monkeypatch.delenv(var, raising=False)
+        for var in (
+            "AI_COUNCIL__FIREWORKS_API_KEY",
+            "AI_COUNCIL__OPENAI_API_KEY",
+            "AI_COUNCIL__ANTHROPIC_API_KEY",
+        ):
+            monkeypatch.delenv(var, raising=False)
+
+        # With no key set, all canonical agents should be missing
+        from ai_council_review.exceptions import ConfigError
+
+        config_no_key = CouncilConfig()
+        with pytest.raises(ConfigError) as exc_info:
+            validate_config(config_no_key)
+
+        error_message = str(exc_info.value)
+        for agent_name in CANONICAL_AGENTS:
+            assert agent_name in error_message
+
+        # With a fireworks key, validation passes for the default agent config
+        monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test-key")
+        config_with_key = CouncilConfig()
+        validate_config(config_with_key)  # should not raise

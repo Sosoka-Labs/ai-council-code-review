@@ -48,7 +48,31 @@ ROUTER = ChatPromptTemplate.from_messages(
                 "  - standard: typical feature/bugfix\n"
                 "  - exhaustive: > 20 files, core architecture changes, or "
                 "security-critical\n"
-                "- Consider the PR title and description for context"
+                "- Consider the PR title and description for context\n"
+                "\n"
+                "Omit 'security' if no files touch auth, crypto, user input, "
+                "API endpoints, or data persistence. Omit 'architecture' if all "
+                "changes are in a single file with no public API changes. Omit "
+                "'quality' for purely structural changes (renaming, moving files, "
+                "docs).\n"
+                "\n"
+                "## Examples\n"
+                "\n"
+                "**Example 1 — Documentation-only PR (README changes only):**\n"
+                '- agents_needed: ["architecture"]\n'
+                '- review_depth: "quick"\n'
+                "\n"
+                "**Example 2 — Auth middleware changes:**\n"
+                '- agents_needed: ["security", "quality", "architecture"]\n'
+                '- review_depth: "exhaustive"\n'
+                "\n"
+                "**Example 3 — Isolated bug fix in a single utility function:**\n"
+                '- agents_needed: ["quality"]\n'
+                '- review_depth: "quick"\n'
+                "\n"
+                "**Example 4 — New database model + migration:**\n"
+                '- agents_needed: ["security", "architecture"]\n'
+                '- review_depth: "standard"'
             ),
         ),
         (
@@ -102,8 +126,6 @@ QUALITY = ChatPromptTemplate.from_messages(
                 "## Guidelines\n"
                 "\n"
                 "- Focus on the diff, but check related files if needed\n"
-                "- Use the repository browser tool to read test files, existing "
-                "patterns, or documentation\n"
                 "- Prioritize issues that could cause real problems\n"
                 "- Suggest concrete improvements, not just complaints\n"
                 "\n"
@@ -117,7 +139,17 @@ QUALITY = ChatPromptTemplate.from_messages(
                 "- `body`: detailed explanation with suggested fix\n"
                 "- `confidence`: 0.0-1.0\n"
                 "\n"
-                "Return only the JSON array. No markdown code blocks, no explanations before or after."
+                "Example output:\n"
+                "[\n"
+                "  {\n"
+                '    "path": "src/auth/login.py",\n'
+                '    "line": 42,\n'
+                '    "severity": "high",\n'
+                '    "category": "quality",\n'
+                '    "body": "Describe the issue clearly with the fix recommendation.",\n'
+                '    "confidence": 0.9\n'
+                "  }\n"
+                "]"
             ),
         ),
         (
@@ -169,7 +201,6 @@ SECURITY = ChatPromptTemplate.from_messages(
                 "## Guidelines\n"
                 "\n"
                 "- Focus on the diff, but consider the broader context\n"
-                "- Use the repository browser tool to check related files if needed\n"
                 "- Flag only genuine security concerns, not stylistic issues\n"
                 "- Be specific about the vulnerability and its impact\n"
                 "\n"
@@ -183,7 +214,17 @@ SECURITY = ChatPromptTemplate.from_messages(
                 "- `body`: detailed explanation with remediation\n"
                 "- `confidence`: 0.0-1.0\n"
                 "\n"
-                "Return only the JSON array. No markdown code blocks, no explanations before or after."
+                "Example output:\n"
+                "[\n"
+                "  {\n"
+                '    "path": "src/auth/login.py",\n'
+                '    "line": 42,\n'
+                '    "severity": "high",\n'
+                '    "category": "security",\n'
+                '    "body": "Describe the issue clearly with the fix recommendation.",\n'
+                '    "confidence": 0.9\n'
+                "  }\n"
+                "]"
             ),
         ),
         (
@@ -252,7 +293,7 @@ GENERALIST = ChatPromptTemplate.from_messages(
                 "- `body`: the review comment text (markdown supported)\n"
                 "- `confidence`: float 0.0-1.0\n"
                 "\n"
-                "If no issues are found, return an empty array."
+                "If no issues are found, return an empty array.\n"
                 "Return only the JSON array. No markdown code blocks, no explanations before or after."
             ),
         ),
@@ -370,12 +411,7 @@ ARCHITECTURE = ChatPromptTemplate.from_messages(
                 "## Guidelines\n"
                 "\n"
                 "- This is the big-picture review — focus on system-level concerns\n"
-                "- Use the repository browser tool aggressively to check:\n"
-                "  - README.md for API changes\n"
-                "  - docs/ for documentation gaps\n"
-                "  - tests/ for missing test coverage\n"
-                "  - Related files for consistency\n"
-                "  - Configuration files for deployment impact\n"
+                "- Consider cross-file impact based on the diff and file list provided\n"
                 "- Consider both the immediate change and the long-term "
                 "maintainability\n"
                 "\n"
@@ -389,7 +425,17 @@ ARCHITECTURE = ChatPromptTemplate.from_messages(
                 "- `body`: detailed explanation with architectural recommendations\n"
                 "- `confidence`: 0.0-1.0\n"
                 "\n"
-                "Return only the JSON array. No markdown code blocks, no explanations before or after."
+                "Example output:\n"
+                "[\n"
+                "  {\n"
+                '    "path": "src/auth/login.py",\n'
+                '    "line": 42,\n'
+                '    "severity": "high",\n'
+                '    "category": "architecture",\n'
+                '    "body": "Describe the issue clearly with the fix recommendation.",\n'
+                '    "confidence": 0.9\n'
+                "  }\n"
+                "]"
             ),
         ),
         (

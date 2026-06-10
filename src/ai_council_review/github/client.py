@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import random
 import time
 from typing import Any, cast
@@ -45,7 +44,11 @@ class GitHubClient:
         self.conservative_mode: bool = False
 
     def check_rate_limit(self) -> None:
-        """Check rate limit and enter conservative mode if below threshold."""
+        """Check rate limit and enter conservative mode if below threshold.
+
+        Conservative mode is a one-way latch — once set it is never cleared
+        within the lifetime of this client instance.
+        """
         if (
             self.rate_limit_remaining is not None
             and self.rate_limit_remaining < self.conservative_mode_threshold
@@ -57,8 +60,6 @@ class GitHubClient:
                     threshold=self.conservative_mode_threshold,
                 )
             self.conservative_mode = True
-        else:
-            self.conservative_mode = False
 
     def get_pull_request(self, number: int) -> PullRequest:
         """Fetch a pull request by number.
@@ -151,13 +152,12 @@ class GitHubClient:
         url = f"https://api.github.com/repos/{self.repo_name}/contents/{path}"
         headers = {
             "Authorization": f"Bearer {self.token}",
-            "Accept": "application/vnd.github.raw+json",
+            "Accept": "application/vnd.github.v3.raw",
             "X-GitHub-Api-Version": "2022-11-28",
         }
         try:
             response = self._request("GET", url, headers=headers, params={"ref": ref})
-            data = response.json()
-            return base64.b64decode(data["content"]).decode("utf-8")
+            return response.text
         except Exception:
             logger.debug("File not found", path=path, ref=ref)
             return None

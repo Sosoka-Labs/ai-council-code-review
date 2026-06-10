@@ -59,7 +59,7 @@ def _make_read_file_tool(browser: RepositoryBrowser) -> BaseTool:
             return f"File not found: {path} at {ref}"
         return result
 
-    return read_file  # type: ignore[return-value]
+    return read_file
 
 
 def _make_list_files_tool(browser: RepositoryBrowser) -> BaseTool:
@@ -84,7 +84,7 @@ def _make_list_files_tool(browser: RepositoryBrowser) -> BaseTool:
             return f"Directory not found: {path} at {ref}"
         return "\n".join(result)
 
-    return list_files  # type: ignore[return-value]
+    return list_files
 
 
 def _make_find_files_tool(browser: RepositoryBrowser) -> BaseTool:
@@ -107,4 +107,4 @@ def _make_find_files_tool(browser: RepositoryBrowser) -> BaseTool:
         result = browser.find_files(pattern, ref)
         return "\n".join(result)
 
-    return find_files  # type: ignore[return-value]
+    return find_files

@@ -102,4 +102,4 @@ def _looks_like_secret(value: str) -> bool:
         True if the string looks like a secret.
     """
     prefixes = ("sk-", "fw-", "ghp_", "ghs_", "github_pat_")
-    return any(prefix in value for prefix in prefixes)
+    return any(value.startswith(prefix) for prefix in prefixes)

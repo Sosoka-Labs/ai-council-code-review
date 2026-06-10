@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any
 
 import structlog
-from langchain.agents import AgentExecutor, create_tool_calling_agent
+from langchain_core.runnables import Runnable, RunnableConfig
 
 from ai_council_review.config import AgentConfig, CouncilConfig
+from ai_council_review.exceptions import BudgetExceededError
 from ai_council_review.github.browser import RepositoryBrowser
 from ai_council_review.llm.agents.parsing import parse_findings
 from ai_council_review.llm.prompts.loader import load_prompt
 from ai_council_review.llm.providers.factory import LLMProviderFactory
-from ai_council_review.llm.tools.repository import make_repository_tools
 from ai_council_review.models import Finding, ReviewState
 
 logger = structlog.get_logger()
@@ -54,29 +54,21 @@ def _build_agent_variables(state: ReviewState) -> dict[str, Any]:
 
 def build_generalist_executor(
     config: CouncilConfig,
-    browser: RepositoryBrowser | None,
-) -> AgentExecutor:
-    """Build an AgentExecutor for the generalist agent.
+    browser: RepositoryBrowser | None,  # noqa: ARG001
+) -> Runnable[dict[str, Any], Any]:
+    """Build a prompt | llm chain for the generalist agent.
 
     Args:
         config: Global council configuration.
-        browser: Repository browser for cross-file awareness.
+        browser: Reserved for future tool-based browsing; currently unused.
 
     Returns:
-        Configured AgentExecutor.
+        LangChain Runnable (prompt | llm).
     """
     agent_config = config.agents.get("generalist", AgentConfig())
     llm = LLMProviderFactory.from_config(agent_config, config.providers)
-    tools = make_repository_tools(browser)
     prompt = load_prompt("generalist")
-
-    agent = cast(Any, create_tool_calling_agent(llm, tools, prompt))
-    return AgentExecutor(
-        agent=agent,
-        tools=tools,
-        max_execution_time=config.agent_timeout_seconds,
-        max_iterations=10,
-    )
+    return prompt | llm
 
 
 def run_generalist_agent(
@@ -97,17 +89,20 @@ def run_generalist_agent(
         List of findings.
     """
     logger.info("Generalist agent starting")
-    executor = build_generalist_executor(config, browser)
+    chain = build_generalist_executor(config, browser)
 
     try:
         variables = _build_agent_variables(state)
-        run_config = {"callbacks": callbacks} if callbacks else None
-        result = executor.invoke(variables, config=run_config)  # type: ignore[arg-type]
-        findings = parse_findings(result["output"], agent_name="generalist", logger=logger)
+        run_config: RunnableConfig | None = {"callbacks": callbacks} if callbacks else None
+        result = chain.invoke(variables, config=run_config)
+        output: str = result.content if hasattr(result, "content") else str(result)
+        findings = parse_findings(output, agent_name="generalist", logger=logger)
         logger.info("Generalist agent finished", findings=len(findings))
         if not findings:
-            logger.info("Generalist agent raw output", raw_output=result["output"])
+            logger.info("Generalist agent raw output", raw_output=output)
         return findings
+    except BudgetExceededError:
+        raise
     except Exception as e:
         logger.error("Generalist agent failed", error=str(e))
         return []

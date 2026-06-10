@@ -36,6 +36,10 @@ class ReviewState(BaseModel):
     synthesis: str | None = None
     github_comments: list[ReviewComment] = Field(default_factory=list)
     summary: str | None = None
+    agents_needed: list[str] = Field(
+        default_factory=lambda: ["security", "quality", "architecture"]
+    )
+    review_depth: str = "standard"
     verdict: str = "comment"
     skipped: bool = False
     skip_reason: str | None = None
