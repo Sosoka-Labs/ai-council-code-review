@@ -9,12 +9,17 @@ import yaml
 from pydantic import ValidationError
 
 from ai_council_review.config import (
+    ALL_SKILLS,
     CANONICAL_AGENTS,
     AgentConfig,
     CouncilConfig,
     load_config,
+    resolve_agent_skills_selector,
     validate_config,
+    validate_skill_budgets,
+    validate_skill_references,
 )
+from ai_council_review.exceptions import ConfigError
 
 
 class TestAgentConfig:
@@ -235,3 +240,179 @@ class TestValidateConfig:
         monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test-key")
         config_with_key = CouncilConfig()
         validate_config(config_with_key)  # should not raise
+
+
+class TestSkillSelector:
+    """Tests for SkillSelector-related config fields and helpers."""
+
+    # --- AgentConfig.skills ---
+
+    def test_agent_skills_default_is_none(self) -> None:
+        """AgentConfig.skills defaults to None (inherit from default_agent_skills)."""
+        config = AgentConfig()
+        assert config.skills is None
+
+    def test_agent_skills_accepts_list(self) -> None:
+        """AgentConfig.skills accepts a list of skill names."""
+        config = AgentConfig(skills=["oauth-flows", "jwt-pitfalls"])
+        assert config.skills == ["oauth-flows", "jwt-pitfalls"]
+
+    def test_agent_skills_accepts_star_sentinel(self) -> None:
+        """AgentConfig.skills accepts the '*' all-skills sentinel."""
+        config = AgentConfig(skills=ALL_SKILLS)
+        assert config.skills == "*"
+
+    def test_agent_skills_rejects_other_strings(self) -> None:
+        """AgentConfig.skills rejects bare strings that are not '*'."""
+        with pytest.raises(ValidationError, match="must be None"):
+            AgentConfig(skills="all")  # type: ignore[arg-type]
+
+        with pytest.raises(ValidationError, match="must be None"):
+            AgentConfig(skills="everything")  # type: ignore[arg-type]
+
+    # --- CouncilConfig.default_agent_skills ---
+
+    def test_council_default_agent_skills_default_is_none(self) -> None:
+        """CouncilConfig.default_agent_skills defaults to None."""
+        config = CouncilConfig()
+        assert config.default_agent_skills is None
+
+    def test_council_default_agent_skills_accepts_list(self) -> None:
+        """CouncilConfig.default_agent_skills accepts a list."""
+        config = CouncilConfig(default_agent_skills=["domain-glossary"])
+        assert config.default_agent_skills == ["domain-glossary"]
+
+    def test_council_default_agent_skills_accepts_star(self) -> None:
+        """CouncilConfig.default_agent_skills accepts '*'."""
+        config = CouncilConfig(default_agent_skills="*")
+        assert config.default_agent_skills == "*"
+
+    def test_council_default_agent_skills_rejects_other_strings(self) -> None:
+        """CouncilConfig.default_agent_skills rejects non-sentinel strings."""
+        with pytest.raises(ValidationError, match="must be None"):
+            CouncilConfig(default_agent_skills="all")  # type: ignore[arg-type]
+
+    # --- resolve_agent_skills_selector ---
+
+    def test_resolve_agent_skills_selector_uses_agent_when_set(self) -> None:
+        """Agent-level selector takes precedence over council default."""
+        agent = AgentConfig(skills=["jwt-pitfalls"])
+        council = CouncilConfig(default_agent_skills=["domain-glossary"])
+        result = resolve_agent_skills_selector(agent, council)
+        assert result == ["jwt-pitfalls"]
+
+    def test_resolve_agent_skills_selector_falls_back_to_default(self) -> None:
+        """When agent.skills is None, council.default_agent_skills is returned."""
+        agent = AgentConfig()
+        council = CouncilConfig(default_agent_skills=["domain-glossary"])
+        result = resolve_agent_skills_selector(agent, council)
+        assert result == ["domain-glossary"]
+
+    def test_resolve_agent_skills_selector_explicit_empty_list_opts_out(self) -> None:
+        """An explicit [] on agent.skills opts out, even when a default is set."""
+        agent = AgentConfig(skills=[])
+        council = CouncilConfig(default_agent_skills=["domain-glossary"])
+        result = resolve_agent_skills_selector(agent, council)
+        assert result == []
+
+    def test_resolve_agent_skills_selector_no_default_returns_none(self) -> None:
+        """When both are None, None is returned."""
+        agent = AgentConfig()
+        council = CouncilConfig()
+        result = resolve_agent_skills_selector(agent, council)
+        assert result is None
+
+    # --- validate_skill_references ---
+
+    def test_validate_skill_references_passes_when_all_known(self) -> None:
+        """No exception when all named skills are present in the registry."""
+        from unittest.mock import MagicMock
+
+        registry = MagicMock()
+        registry.__contains__ = lambda self, name: name == "known-skill"
+        registry.names.return_value = ["known-skill"]
+
+        config = CouncilConfig(
+            default_agent_skills=["known-skill"],
+            agents={"security": AgentConfig(skills=["known-skill"])},
+        )
+        validate_skill_references(config, registry)  # should not raise
+
+    def test_validate_skill_references_raises_on_missing(self) -> None:
+        """ConfigError is raised listing all (context, skill) pairs that are missing."""
+        from unittest.mock import MagicMock
+
+        from ai_council_review.exceptions import ConfigError
+
+        registry = MagicMock()
+        registry.__contains__ = lambda self, name: False  # nothing found
+        registry.names.return_value = []
+
+        config = CouncilConfig(
+            default_agent_skills=["missing-skill"],
+        )
+        with pytest.raises(ConfigError, match="missing-skill"):
+            validate_skill_references(config, registry)
+
+    def test_validate_skill_references_star_always_valid(self) -> None:
+        """The '*' sentinel is never checked against the registry."""
+        from unittest.mock import MagicMock
+
+        registry = MagicMock()
+        registry.__contains__ = lambda self, name: False  # nothing found
+        registry.names.return_value = []
+
+        config = CouncilConfig(
+            default_agent_skills="*",
+            agents={"security": AgentConfig(skills="*")},
+        )
+        validate_skill_references(config, registry)  # should not raise
+
+    # --- validate_skill_budgets ---
+
+    def test_validate_skill_budgets_raises_at_startup_when_hard_exceeded(self) -> None:
+        """Hard budget violations fail fast at config load, not at chain build."""
+        from pathlib import Path
+
+        from ai_council_review.skills.models import Skill
+        from ai_council_review.skills.registry import SkillRegistry
+
+        # 5000 chars -> ~1250 tokens via len/4 heuristic. Two of them = 2500
+        # tokens — over a hard cap set to 1000.
+        big_body = "x" * 5000
+        skill = Skill(
+            name="huge",
+            description="A heavy skill.",
+            body=big_body,
+            path=Path("/fake/huge/SKILL.md"),
+            raw_frontmatter={"name": "huge", "description": "A heavy skill."},
+        )
+        registry = SkillRegistry({"huge": skill})
+
+        config = CouncilConfig(
+            skills_token_budget_soft=500,
+            skills_token_budget_hard=1000,
+            agents={"security": AgentConfig(skills=["huge"])},
+        )
+
+        with pytest.raises(ConfigError, match="hard token budget"):
+            validate_skill_budgets(config, registry)
+
+    def test_validate_skill_budgets_passes_when_under_hard(self) -> None:
+        """Under the hard cap, validation succeeds (soft warn is non-fatal)."""
+        from pathlib import Path
+
+        from ai_council_review.skills.models import Skill
+        from ai_council_review.skills.registry import SkillRegistry
+
+        skill = Skill(
+            name="small",
+            description="A small skill.",
+            body="tiny",
+            path=Path("/fake/small/SKILL.md"),
+            raw_frontmatter={"name": "small", "description": "A small skill."},
+        )
+        registry = SkillRegistry({"small": skill})
+
+        config = CouncilConfig(agents={"security": AgentConfig(skills=["small"])})
+        validate_skill_budgets(config, registry)  # should not raise

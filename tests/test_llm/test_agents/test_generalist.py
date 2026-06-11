@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -14,6 +15,22 @@ from ai_council_review.llm.agents.generalist import (
     run_generalist_agent,
 )
 from ai_council_review.models import FileInfo, Finding, PRMetadata, ReviewState, Severity
+from ai_council_review.skills.models import Skill
+from ai_council_review.skills.registry import SkillRegistry
+
+
+def _make_registry(*names: str) -> SkillRegistry:
+    skills = {
+        n: Skill(
+            name=n,
+            description=f"Desc {n}",
+            body=f"# {n} body",
+            path=Path(f"/fake/{n}/SKILL.md"),
+            raw_frontmatter={"name": n, "description": f"Desc {n}"},
+        )
+        for n in names
+    }
+    return SkillRegistry(skills)
 
 
 def _make_state() -> ReviewState:
@@ -71,6 +88,46 @@ class TestBuildGeneralistExecutor:
 
         assert chain is not None
 
+    def test_build_generalist_executor_injects_skills_when_registry_provided(self) -> None:
+        """apply_skills is called when a non-empty registry with matching skills is given."""
+        mock_llm = MagicMock()
+        registry = _make_registry("review-guidelines")
+
+        with (
+            patch(
+                "ai_council_review.llm.agents.generalist.LLMProviderFactory.from_config",
+                return_value=mock_llm,
+            ),
+            patch(
+                "ai_council_review.llm.agents.generalist.apply_skills",
+                wraps=lambda prompt, skills: prompt,
+            ) as mock_apply,
+        ):
+            build_generalist_executor(
+                CouncilConfig(default_agent_skills=["review-guidelines"]),
+                browser=None,
+                registry=registry,
+            )
+
+        mock_apply.assert_called_once()
+
+    def test_build_generalist_executor_unchanged_when_registry_is_none(self) -> None:
+        """Passing registry=None does not call apply_skills."""
+        mock_llm = MagicMock()
+
+        with (
+            patch(
+                "ai_council_review.llm.agents.generalist.LLMProviderFactory.from_config",
+                return_value=mock_llm,
+            ),
+            patch(
+                "ai_council_review.llm.agents.generalist.apply_skills",
+            ) as mock_apply,
+        ):
+            build_generalist_executor(CouncilConfig(), browser=None, registry=None)
+
+        mock_apply.assert_not_called()
+
 
 class TestRunGeneralistAgent:
     """Tests for run_generalist_agent."""
@@ -124,3 +181,25 @@ class TestRunGeneralistAgent:
             pytest.raises(BudgetExceededError),
         ):
             run_generalist_agent(_make_state(), CouncilConfig(), None)
+
+    def test_run_generalist_agent_forwards_registry_to_builder(self) -> None:
+        """Regression: registry must be threaded through to build_generalist_executor.
+
+        A previous version of run_generalist_agent accepted a registry parameter but
+        silently dropped it on the floor, so skills never reached the generalist.
+        """
+        mock_result = MagicMock()
+        mock_result.content = "[]"
+        mock_chain = MagicMock()
+        mock_chain.invoke.return_value = mock_result
+        registry = _make_registry("review-guidelines")
+
+        with patch(
+            "ai_council_review.llm.agents.generalist.build_generalist_executor",
+            return_value=mock_chain,
+        ) as mock_build:
+            run_generalist_agent(_make_state(), CouncilConfig(), None, registry=registry)
+
+        # Builder must receive the same registry instance, not None.
+        _, kwargs = mock_build.call_args
+        assert kwargs.get("registry") is registry

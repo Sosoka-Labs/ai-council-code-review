@@ -44,6 +44,7 @@ agents:
     model_name: openai/gpt-4o
     temperature: 0.2
     max_tokens: 16000
+    skills: [oauth-pitfalls]   # bind the bundled demo skill to this agent
 
   quality:
     enabled: true

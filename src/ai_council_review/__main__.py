@@ -4,19 +4,27 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import sys
 import threading
+from pathlib import Path
 from typing import Any
 
 import structlog
 
-from ai_council_review.config import load_config, validate_config
+from ai_council_review.config import (
+    load_config,
+    validate_config,
+    validate_skill_budgets,
+    validate_skill_references,
+)
 from ai_council_review.exceptions import ConfigError, LLMProviderError
 from ai_council_review.github.client import GitHubClient
 from ai_council_review.github.ingestor import PRIngestor
 from ai_council_review.llm.graph import build_graph
 from ai_council_review.models import FileInfo, ReviewState
+from ai_council_review.skills import SkillRegistry
 from ai_council_review.utils.debug import dump_state
 
 logger = structlog.get_logger()
@@ -25,10 +33,28 @@ _logging_configured = False
 
 
 def configure_logging() -> None:
-    """Configure structlog once; subsequent calls are no-ops."""
+    """Configure structlog once; subsequent calls are no-ops.
+
+    Wires a StreamHandler to the root logger at INFO so structlog records
+    (which route through structlog.stdlib.LoggerFactory and therefore through
+    Python's logging module) actually surface on stdout. Without this handler
+    every logger.info() call is silently dropped — including the per-agent
+    "skills attached" lines and every X agent starting/finished event.
+    """
     global _logging_configured
     if _logging_configured:
         return
+
+    # Idempotent root logger setup: only attach a handler if none exist.
+    root = logging.getLogger()
+    if not root.handlers:
+        handler = logging.StreamHandler(sys.stdout)
+        # structlog already formats the line; the stdlib formatter must pass
+        # the rendered message through verbatim.
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        root.addHandler(handler)
+    root.setLevel(os.environ.get("AI_COUNCIL_LOG_LEVEL", "INFO").upper())
+
     structlog.configure(
         processors=[
             structlog.stdlib.filter_by_level,
@@ -96,6 +122,15 @@ def main() -> int:
         config = load_config(args.config)
         validate_config(config)
         logger.info("Config loaded", config_path=args.config or ".ai-council/config.yaml")
+
+        # Load skills registry from the configured path (relative to CWD,
+        # i.e. the repo root where the tool was invoked). Skills load in
+        # dry-run mode too so users can verify wiring without a real run.
+        skills_dir = Path.cwd() / config.skills_path
+        registry = SkillRegistry.load(skills_dir)
+        validate_skill_references(config, registry)
+        validate_skill_budgets(config, registry)
+        logger.info("Skills loaded", count=len(registry), names=registry.names())
 
         # Build initial state
         state = ReviewState()
@@ -197,7 +232,7 @@ def main() -> int:
                 dump_state(state)
             return 0
 
-        graph = build_graph(config)
+        graph = build_graph(config, registry)
 
         result_holder: dict[str, Any] = {}
         exc_holder: list[Exception] = []

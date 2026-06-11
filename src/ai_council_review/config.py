@@ -4,13 +4,22 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 CANONICAL_AGENTS: list[str] = ["router", "security", "quality", "architecture", "synthesis"]
+
+# Sentinel string that resolves to "all discovered skills" at runtime.
+ALL_SKILLS = "*"
+
+# None  → inherit from default_agent_skills (or no skills if that's also None)
+# []    → explicit opt-out: no skills even if default_agent_skills is set
+# [...]  → explicit list of skill names to bind
+# "*"   → bind all skills in the registry
+SkillSelector = list[str] | Literal["*"] | None
 
 MODEL_ALIASES: dict[str, str] = {
     "fireworks/llama-3.1-70b": "accounts/fireworks/models/llama-v3p1-70b-instruct",
@@ -45,6 +54,11 @@ class AgentConfig(BaseModel):
     ``model_name`` is the model identifier. If unset, a sensible default for the
     chosen provider is filled in from DEFAULT_MODELS_BY_PROVIDER — users are
     encouraged to override per agent.
+
+    ``skills`` controls which domain-knowledge skill files are injected into
+    this agent's system prompt. None (default) means "inherit from
+    CouncilConfig.default_agent_skills". [] is an explicit opt-out. A list of
+    names binds those specific skills. "*" binds all discovered skills.
     """
 
     enabled: bool = True
@@ -53,6 +67,22 @@ class AgentConfig(BaseModel):
     temperature: float = 0.3
     max_tokens: int = 16000
     system_prompt: str | None = None
+    skills: SkillSelector = None
+
+    @field_validator("skills", mode="before")
+    @classmethod
+    def _validate_skills(cls, value: object) -> object:
+        """Reject bare strings other than the '*' sentinel.
+
+        Accepted forms: None, "*", [], ["name1", "name2"].
+        Strings like "all" or "everything" are rejected with a clear message.
+        """
+        if isinstance(value, str) and value != ALL_SKILLS:
+            raise ValueError(
+                f"skills must be None, '*', or a list of skill names — got string {value!r}. "
+                "To bind all skills use '*'."
+            )
+        return value
 
     @field_validator("model_name", mode="before")
     @classmethod
@@ -115,6 +145,21 @@ class CouncilConfig(BaseModel):
     rate_limit_threshold: int = 50
     agents: dict[str, AgentConfig] = Field(default_factory=dict)
     providers: dict[str, ProviderConfig] = Field(default_factory=dict)
+    skills_path: str = ".ai-council/skills"
+    default_agent_skills: SkillSelector = None
+    skills_token_budget_soft: int = 8000
+    skills_token_budget_hard: int = 16000
+
+    @field_validator("default_agent_skills", mode="before")
+    @classmethod
+    def _validate_default_agent_skills(cls, value: object) -> object:
+        """Reject bare strings other than the '*' sentinel."""
+        if isinstance(value, str) and value != ALL_SKILLS:
+            raise ValueError(
+                f"default_agent_skills must be None, '*', or a list of skill names — "
+                f"got string {value!r}. To bind all skills use '*'."
+            )
+        return value
 
 
 class EnvConfig(BaseSettings):
@@ -197,6 +242,104 @@ def _provider_has_key(provider_name: str, provider_cfg: ProviderConfig) -> bool:
         return True
     bare_env = _BARE_ENV_VARS.get(provider_name)
     return bool(bare_env and os.environ.get(bare_env))
+
+
+def resolve_agent_skills_selector(
+    agent: AgentConfig, council: CouncilConfig
+) -> list[str] | Literal["*"] | None:
+    """Return the effective skill selector for an agent.
+
+    Precedence:
+    1. ``agent.skills`` if it is not None (including []).
+    2. ``council.default_agent_skills`` if set.
+    3. None.
+
+    An explicit empty list on ``agent.skills`` is treated as an opt-out and
+    returned as-is. Only ``None`` (truly unset) falls through to the default.
+    """
+    if agent.skills is not None:
+        return agent.skills
+    return council.default_agent_skills
+
+
+def validate_skill_references(
+    config: CouncilConfig,
+    registry: Any,  # SkillRegistry — typed as Any to avoid circular import at module load
+) -> None:
+    """Check that every explicitly-named skill exists in the registry.
+
+    The ``*`` sentinel is always valid. Only explicit name lists are checked.
+    Checks both ``default_agent_skills`` and each agent's ``skills`` field.
+
+    Args:
+        config: Council configuration.
+        registry: A SkillRegistry instance.
+
+    Raises:
+        ConfigError: Listing all (agent_context, skill_name) pairs that are missing.
+    """
+    from ai_council_review.exceptions import ConfigError
+
+    missing: list[str] = []
+
+    def _check(names: list[str], context: str) -> None:
+        for name in names:
+            if name not in registry:
+                missing.append(f"  {context}: {name!r}")
+
+    # Check top-level default
+    if isinstance(config.default_agent_skills, list):
+        _check(config.default_agent_skills, "default_agent_skills")
+
+    # Check per-agent selectors
+    for agent_name, agent_cfg in config.agents.items():
+        if isinstance(agent_cfg.skills, list):
+            _check(agent_cfg.skills, f"agents.{agent_name}.skills")
+
+    if missing:
+        raise ConfigError(
+            "The following skills are referenced in config but not found on disk:\n"
+            + "\n".join(missing)
+            + f"\n\nSkills directory: {config.skills_path}\n"
+            "Available skills: " + str(registry.names())
+        )
+
+
+def validate_skill_budgets(
+    config: CouncilConfig,
+    registry: Any,  # SkillRegistry — typed as Any to avoid circular import at module load
+) -> None:
+    """Fail fast at config-load time if any agent's resolved skills bust the hard budget.
+
+    Mirrors what resolve_skills_for_agent would do at chain-build time, but
+    runs once upfront so operators learn about budget issues at startup instead
+    of mid-review. Soft-budget warnings also fire here.
+
+    Args:
+        config: Council configuration.
+        registry: A SkillRegistry instance.
+
+    Raises:
+        ConfigError: When any agent's resolved skills exceed the hard token budget.
+    """
+    import structlog
+
+    from ai_council_review.skills.resolution import resolve_skills_for_agent
+
+    log = structlog.get_logger(__name__)
+
+    for agent_name in CANONICAL_AGENTS:
+        # resolve_skills_for_agent enforces both soft (warn) and hard (raise).
+        skills = resolve_skills_for_agent(agent_name, config, registry)
+        # Emit a per-agent INFO summary at startup so operators can confirm
+        # the resolved bindings without grepping mid-run logs.
+        log.info(
+            "agent skill binding resolved",
+            agent=agent_name,
+            count=len(skills),
+            names=[s.name for s in skills],
+            total_tokens=sum(s.estimated_tokens() for s in skills),
+        )
 
 
 def validate_config(config: CouncilConfig) -> None:

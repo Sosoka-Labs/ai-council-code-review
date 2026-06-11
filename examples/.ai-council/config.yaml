@@ -65,6 +65,7 @@ agents:
     model_name: fireworks/llama-3.1-70b
     temperature: 0.2
     max_tokens: 16000
+    skills: [oauth-pitfalls]             # bind the bundled demo skill to this agent
 
   # Quality checks for bugs, logic errors, type safety, missing tests, and readability.
   quality:
@@ -91,6 +92,34 @@ agents:
     model_name: fireworks/kimi-k2p6      # strong reasoning
     temperature: 0.2
     max_tokens: 16000
+
+# ── Skills ──────────────────────────────────────────────────────────────────
+# Skills are domain knowledge files at .ai-council/skills/<name>/SKILL.md
+# that you can bind to specific agents. Three patterns:
+#
+#   1. Explicit per-agent binding (recommended for most projects):
+#      agents:
+#        security:
+#          skills: [oauth-pitfalls, jwt-validation]
+#
+#   2. Star sentinel — give one agent every discovered skill:
+#      agents:
+#        architecture:
+#          skills: "*"
+#
+#   3. Top-level default — apply to every agent that doesn't set its own:
+#      default_agent_skills: [domain-glossary]
+#
+# Resolution per agent: explicit skills: → default_agent_skills → none
+# Set skills: [] on an agent to explicitly opt out from the default.
+#
+# skills_path: .ai-council/skills      # where SKILL.md files live; default shown
+# default_agent_skills: null            # optional list, "*" sentinel, or null
+# skills_token_budget_soft: 8000        # warn if an agent's total skill bodies exceed
+# skills_token_budget_hard: 16000       # error if an agent's total skill bodies exceed
+#
+# The example below binds the bundled oauth-pitfalls skill to the security
+# agent. Add your own skills under .ai-council/skills/ and reference them here.
 
 # ── LLM Provider Settings ───────────────────────────────────────────────────
 # API keys are loaded from environment variables (FIREWORKS_API_KEY, etc.)
