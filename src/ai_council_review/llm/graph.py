@@ -19,6 +19,7 @@ from ai_council_review.llm.agents.security import run_security_agent
 from ai_council_review.llm.agents.synthesis import run_synthesis_agent
 from ai_council_review.llm.cost_tracker import CostCallbackHandler, CostTracker
 from ai_council_review.models import FileInfo, Finding, ReviewComment, ReviewState
+from ai_council_review.skills.registry import SkillRegistry
 from ai_council_review.utils.patch_parser import get_position_for_line
 
 logger = structlog.get_logger()
@@ -82,12 +83,17 @@ def ingest_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
     }
 
 
-def router_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
+def router_node(
+    state: ReviewState,
+    config: CouncilConfig,
+    registry: SkillRegistry | None = None,
+) -> dict[str, Any]:
     """Run the router agent to decide which agents are needed.
 
     Args:
         state: Current review state.
         config: Council configuration.
+        registry: Optional skill registry for descriptions-only catalog injection.
 
     Returns:
         Updates to the state with routing decision.
@@ -101,7 +107,7 @@ def router_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
         logger.info("No files to review")
         return {}
 
-    result = run_router_agent(state, config)
+    result = run_router_agent(state, config, registry=registry)
 
     logger.info(
         "Router complete",
@@ -147,6 +153,7 @@ def security_node(
     state: ReviewState,
     config: CouncilConfig,
     cost_tracker: CostTracker | None = None,
+    registry: SkillRegistry | None = None,
 ) -> dict[str, Any]:
     """Run the security agent.
 
@@ -154,6 +161,7 @@ def security_node(
         state: Current review state.
         config: Council configuration.
         cost_tracker: Optional cost tracker for budget enforcement.
+        registry: Optional skill registry for skill injection.
 
     Returns:
         Updates to the state.
@@ -162,7 +170,7 @@ def security_node(
         return {}
 
     callbacks = _make_cost_callback(cost_tracker, "security", config)
-    findings = run_security_agent(state, config, callbacks=callbacks)
+    findings = run_security_agent(state, config, callbacks=callbacks, registry=registry)
     return {
         "agent_outputs": {"security": findings},
     }
@@ -172,6 +180,7 @@ def quality_node(
     state: ReviewState,
     config: CouncilConfig,
     cost_tracker: CostTracker | None = None,
+    registry: SkillRegistry | None = None,
 ) -> dict[str, Any]:
     """Run the quality agent.
 
@@ -179,6 +188,7 @@ def quality_node(
         state: Current review state.
         config: Council configuration.
         cost_tracker: Optional cost tracker for budget enforcement.
+        registry: Optional skill registry for skill injection.
 
     Returns:
         Updates to the state.
@@ -187,7 +197,7 @@ def quality_node(
         return {}
 
     callbacks = _make_cost_callback(cost_tracker, "quality", config)
-    findings = run_quality_agent(state, config, callbacks=callbacks)
+    findings = run_quality_agent(state, config, callbacks=callbacks, registry=registry)
     return {
         "agent_outputs": {"quality": findings},
     }
@@ -197,6 +207,7 @@ def architecture_node(
     state: ReviewState,
     config: CouncilConfig,
     cost_tracker: CostTracker | None = None,
+    registry: SkillRegistry | None = None,
 ) -> dict[str, Any]:
     """Run the architecture agent.
 
@@ -204,6 +215,7 @@ def architecture_node(
         state: Current review state.
         config: Council configuration.
         cost_tracker: Optional cost tracker for budget enforcement.
+        registry: Optional skill registry for skill injection.
 
     Returns:
         Updates to the state.
@@ -212,7 +224,7 @@ def architecture_node(
         return {}
 
     callbacks = _make_cost_callback(cost_tracker, "architecture", config)
-    findings = run_architecture_agent(state, config, callbacks=callbacks)
+    findings = run_architecture_agent(state, config, callbacks=callbacks, registry=registry)
     return {
         "agent_outputs": {"architecture": findings},
     }
@@ -411,11 +423,14 @@ def _route_from_router(state: ReviewState) -> list[str]:
     return [a for a in state.agents_needed if a in valid_agents]
 
 
-def build_graph(config: CouncilConfig) -> Any:
+def build_graph(config: CouncilConfig, registry: SkillRegistry | None = None) -> Any:
     """Build the LangGraph state machine with multi-agent routing.
 
     Args:
         config: Council configuration.
+        registry: Optional skill registry. When provided, domain-knowledge skill
+            files are injected into each specialist agent's system prompt at
+            chain build time. Defaults to None for backwards compatibility.
 
     Returns:
         Compiled StateGraph.
@@ -425,12 +440,20 @@ def build_graph(config: CouncilConfig) -> Any:
     # Initialize cost tracker for the entire graph run
     cost_tracker = CostTracker(config)
 
-    # Nodes
+    # Nodes — registry is closed over in each lambda so the same registry
+    # instance is shared across all nodes without threading it through state.
     workflow.add_node("ingest", lambda state: ingest_node(state, config))
-    workflow.add_node("router", lambda state: router_node(state, config))
-    workflow.add_node("security", lambda state: security_node(state, config, cost_tracker))
-    workflow.add_node("quality", lambda state: quality_node(state, config, cost_tracker))
-    workflow.add_node("architecture", lambda state: architecture_node(state, config, cost_tracker))
+    workflow.add_node("router", lambda state: router_node(state, config, registry=registry))
+    workflow.add_node(
+        "security", lambda state: security_node(state, config, cost_tracker, registry=registry)
+    )
+    workflow.add_node(
+        "quality", lambda state: quality_node(state, config, cost_tracker, registry=registry)
+    )
+    workflow.add_node(
+        "architecture",
+        lambda state: architecture_node(state, config, cost_tracker, registry=registry),
+    )
     workflow.add_node("synthesis_agent", lambda state: synthesis_node(state, config, cost_tracker))
     workflow.add_node("post", lambda state: post_node(state, config))
 

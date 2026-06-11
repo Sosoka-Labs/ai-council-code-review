@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -11,6 +12,8 @@ from ai_council_review.exceptions import BudgetExceededError
 from ai_council_review.llm.agents.output_models import FindingList
 from ai_council_review.llm.agents.security import build_security_chain, run_security_agent
 from ai_council_review.models import FileInfo, Finding, PRMetadata, ReviewState, Severity
+from ai_council_review.skills.models import Skill
+from ai_council_review.skills.registry import SkillRegistry
 
 
 def _make_state() -> ReviewState:
@@ -55,6 +58,21 @@ def _valid_finding_list() -> FindingList:
     )
 
 
+def _make_registry(*names: str) -> SkillRegistry:
+    """Return a SkillRegistry with minimal Skill objects."""
+    skills = {
+        n: Skill(
+            name=n,
+            description=f"Desc {n}",
+            body=f"# {n} body",
+            path=Path(f"/fake/{n}/SKILL.md"),
+            raw_frontmatter={"name": n, "description": f"Desc {n}"},
+        )
+        for n in names
+    }
+    return SkillRegistry(skills)
+
+
 class TestBuildSecurityChain:
     """Tests for build_security_chain."""
 
@@ -69,6 +87,81 @@ class TestBuildSecurityChain:
             chain = build_security_chain(CouncilConfig())
 
         assert chain is not None
+
+    def test_build_security_chain_injects_skills_when_registry_provided(self) -> None:
+        """apply_skills is called when a non-empty registry with matching skills is given."""
+        mock_llm = MagicMock()
+        registry = _make_registry("auth-patterns")
+        config = CouncilConfig(default_agent_skills=["auth-patterns"])
+
+        with (
+            patch(
+                "ai_council_review.llm.agents.security.LLMProviderFactory.from_config",
+                return_value=mock_llm,
+            ),
+            patch(
+                "ai_council_review.llm.agents.security.apply_skills",
+                wraps=lambda prompt, skills: prompt,
+            ) as mock_apply,
+        ):
+            build_security_chain(config, registry=registry)
+
+        mock_apply.assert_called_once()
+
+    def test_build_security_chain_system_message_contains_skills_marker(self) -> None:
+        """The rebuilt prompt's system message contains the skills block start marker."""
+        from langchain_core.prompts import ChatPromptTemplate
+
+        from ai_council_review.skills.injection import apply_skills as real_apply_skills
+
+        mock_llm = MagicMock()
+        registry = _make_registry("auth-patterns")
+
+        captured_prompts: list[ChatPromptTemplate] = []
+
+        def _capturing_apply(prompt: ChatPromptTemplate, skills: list) -> ChatPromptTemplate:
+            result = real_apply_skills(prompt, skills)
+            captured_prompts.append(result)
+            return result
+
+        with (
+            patch(
+                "ai_council_review.llm.agents.security.LLMProviderFactory.from_config",
+                return_value=mock_llm,
+            ),
+            patch(
+                "ai_council_review.llm.agents.security.apply_skills",
+                side_effect=_capturing_apply,
+            ),
+        ):
+            build_security_chain(
+                CouncilConfig(default_agent_skills=["auth-patterns"]),
+                registry=registry,
+            )
+
+        assert len(captured_prompts) == 1
+        system_text = str(captured_prompts[0])
+        assert "<!-- ai-council:skills:start -->" in system_text
+
+    def test_build_security_chain_unchanged_when_registry_is_none(self) -> None:
+        """Passing registry=None produces the same chain as the no-registry call."""
+        mock_llm = MagicMock()
+
+        with patch(
+            "ai_council_review.llm.agents.security.LLMProviderFactory.from_config",
+            return_value=mock_llm,
+        ):
+            chain_no_registry = build_security_chain(CouncilConfig())
+
+        with patch(
+            "ai_council_review.llm.agents.security.LLMProviderFactory.from_config",
+            return_value=mock_llm,
+        ):
+            chain_none = build_security_chain(CouncilConfig(), registry=None)
+
+        # Both calls succeed and return a Runnable.
+        assert chain_no_registry is not None
+        assert chain_none is not None
 
 
 class TestRunSecurityAgent:

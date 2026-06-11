@@ -49,3 +49,21 @@ class BudgetExceededError(AICouncilError):
     """Review budget exceeded."""
 
     pass
+
+
+class SkillError(AICouncilError):
+    """Base for all skill-related errors."""
+
+    pass
+
+
+class SkillLoadError(SkillError):
+    """Raised when a SKILL.md cannot be parsed or fails validation."""
+
+    pass
+
+
+class SkillNotFoundError(SkillError):
+    """Raised when a requested skill name is not in the registry."""
+
+    pass

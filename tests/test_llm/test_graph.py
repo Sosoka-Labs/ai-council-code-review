@@ -170,7 +170,7 @@ class TestRouterNode:
 
         assert result["agents_needed"] == ["security", "quality"]
         assert result["review_depth"] == "deep"
-        mock_router.assert_called_once_with(state, config)
+        mock_router.assert_called_once_with(state, config, registry=None)
 
     def test_router_node_skipped(self) -> None:
         """Skipped state returns empty updates."""

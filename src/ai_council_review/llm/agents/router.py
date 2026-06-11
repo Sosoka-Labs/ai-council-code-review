@@ -11,6 +11,9 @@ from ai_council_review.config import AgentConfig, CouncilConfig
 from ai_council_review.llm.prompts.loader import load_prompt
 from ai_council_review.llm.providers.factory import LLMProviderFactory
 from ai_council_review.models import ReviewState
+from ai_council_review.skills import apply_skill_catalog
+from ai_council_review.skills.registry import SkillRegistry
+from ai_council_review.skills.resolution import resolve_skills_for_agent
 
 logger = structlog.get_logger()
 
@@ -59,11 +62,14 @@ def _build_router_variables(state: ReviewState) -> dict[str, Any]:
     }
 
 
-def build_router_chain(config: CouncilConfig) -> Any:
+def build_router_chain(config: CouncilConfig, registry: SkillRegistry | None = None) -> Any:
     """Build an LCEL chain for the router agent.
 
     Args:
         config: Global council configuration.
+        registry: Optional skill registry. When provided, a descriptions-only
+            catalog is appended to the router's system prompt so it can factor
+            domain-skill coverage into its routing decision.
 
     Returns:
         Runnable chain that outputs RouterOutput.
@@ -72,6 +78,9 @@ def build_router_chain(config: CouncilConfig) -> Any:
 
     llm = LLMProviderFactory.from_config(agent_config, config.providers)
     prompt = load_prompt("router")
+    if registry is not None:
+        skills = resolve_skills_for_agent("router", config, registry)
+        prompt = apply_skill_catalog(prompt, skills)
     return prompt | llm.with_structured_output(RouterOutput)
 
 
@@ -79,6 +88,7 @@ def run_router_agent(
     state: ReviewState,
     config: CouncilConfig,
     callbacks: list[Any] | None = None,
+    registry: SkillRegistry | None = None,
 ) -> RouterOutput:
     """Run the router agent and determine which agents are needed.
 
@@ -86,12 +96,13 @@ def run_router_agent(
         state: Current review state.
         config: Council configuration.
         callbacks: Optional LangChain callbacks (e.g., CostCallbackHandler).
+        registry: Optional skill registry for catalog injection.
 
     Returns:
         RouterOutput with agents_needed, review_depth, and reasoning.
     """
     logger.info("Router agent starting")
-    chain = build_router_chain(config)
+    chain = build_router_chain(config, registry=registry)
 
     try:
         variables = _build_router_variables(state)

@@ -75,6 +75,10 @@ For a full list of environment variables and configuration options, see [AGENTS.
 - Structured logging with `structlog` instead of `print`
 - No business logic in `__main__.py` — keep entry points thin
 
+## Skills
+
+Skills (`.ai-council/skills/<name>/SKILL.md`) are a feature for downstream *consumers* of AI Council, not a requirement for contributing to the tool itself. Contributors do not need to create or maintain skills. The example skill at `.ai-council/skills/oauth-pitfalls/` lives in this repository as a dogfood demo — it is reviewed by the security agent when AI Council reviews its own PRs, and it serves as a concrete template for users adding their own project-specific skills.
+
 ## Questions?
 
 Open a [GitHub Discussion](https://github.com/Sosoka-Labs/ai-council-code-review/discussions) or reach out via issue.

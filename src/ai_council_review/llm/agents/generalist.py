@@ -14,6 +14,9 @@ from ai_council_review.llm.agents.parsing import parse_findings
 from ai_council_review.llm.prompts.loader import load_prompt
 from ai_council_review.llm.providers.factory import LLMProviderFactory
 from ai_council_review.models import Finding, ReviewState
+from ai_council_review.skills import apply_skills
+from ai_council_review.skills.registry import SkillRegistry
+from ai_council_review.skills.resolution import resolve_skills_for_agent
 
 logger = structlog.get_logger()
 
@@ -55,12 +58,15 @@ def _build_agent_variables(state: ReviewState) -> dict[str, Any]:
 def build_generalist_executor(
     config: CouncilConfig,
     browser: RepositoryBrowser | None,  # noqa: ARG001
+    registry: SkillRegistry | None = None,
 ) -> Runnable[dict[str, Any], Any]:
     """Build a prompt | llm chain for the generalist agent.
 
     Args:
         config: Global council configuration.
         browser: Reserved for future tool-based browsing; currently unused.
+        registry: Optional skill registry. When provided, resolved skill bodies
+            are appended to the system prompt.
 
     Returns:
         LangChain Runnable (prompt | llm).
@@ -68,6 +74,9 @@ def build_generalist_executor(
     agent_config = config.agents.get("generalist", AgentConfig())
     llm = LLMProviderFactory.from_config(agent_config, config.providers)
     prompt = load_prompt("generalist")
+    if registry is not None:
+        skills = resolve_skills_for_agent("generalist", config, registry)
+        prompt = apply_skills(prompt, skills)
     return prompt | llm
 
 
@@ -76,6 +85,7 @@ def run_generalist_agent(
     config: CouncilConfig,
     browser: RepositoryBrowser | None,
     callbacks: list[Any] | None = None,
+    registry: SkillRegistry | None = None,
 ) -> list[Finding]:
     """Run the generalist agent and return findings.
 
@@ -84,12 +94,13 @@ def run_generalist_agent(
         config: Council configuration.
         browser: Repository browser.
         callbacks: Optional LangChain callbacks (e.g., CostCallbackHandler).
+        registry: Optional skill registry for skill injection.
 
     Returns:
         List of findings.
     """
     logger.info("Generalist agent starting")
-    chain = build_generalist_executor(config, browser)
+    chain = build_generalist_executor(config, browser, registry=registry)
 
     try:
         variables = _build_agent_variables(state)

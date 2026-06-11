@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -14,6 +15,22 @@ from ai_council_review.llm.agents.architecture import (
 )
 from ai_council_review.llm.agents.output_models import FindingList
 from ai_council_review.models import FileInfo, Finding, PRMetadata, ReviewState, Severity
+from ai_council_review.skills.models import Skill
+from ai_council_review.skills.registry import SkillRegistry
+
+
+def _make_registry(*names: str) -> SkillRegistry:
+    skills = {
+        n: Skill(
+            name=n,
+            description=f"Desc {n}",
+            body=f"# {n} body",
+            path=Path(f"/fake/{n}/SKILL.md"),
+            raw_frontmatter={"name": n, "description": f"Desc {n}"},
+        )
+        for n in names
+    }
+    return SkillRegistry(skills)
 
 
 def _make_state() -> ReviewState:
@@ -79,6 +96,45 @@ class TestBuildArchitectureChain:
             chain = build_architecture_chain(CouncilConfig())
 
         assert chain is not None
+
+    def test_build_architecture_chain_injects_skills_when_registry_provided(self) -> None:
+        """apply_skills is called when a non-empty registry with matching skills is given."""
+        mock_llm = MagicMock()
+        registry = _make_registry("domain-glossary")
+
+        with (
+            patch(
+                "ai_council_review.llm.agents.architecture.LLMProviderFactory.from_config",
+                return_value=mock_llm,
+            ),
+            patch(
+                "ai_council_review.llm.agents.architecture.apply_skills",
+                wraps=lambda prompt, skills: prompt,
+            ) as mock_apply,
+        ):
+            build_architecture_chain(
+                CouncilConfig(default_agent_skills=["domain-glossary"]),
+                registry=registry,
+            )
+
+        mock_apply.assert_called_once()
+
+    def test_build_architecture_chain_unchanged_when_registry_is_none(self) -> None:
+        """Passing registry=None does not call apply_skills."""
+        mock_llm = MagicMock()
+
+        with (
+            patch(
+                "ai_council_review.llm.agents.architecture.LLMProviderFactory.from_config",
+                return_value=mock_llm,
+            ),
+            patch(
+                "ai_council_review.llm.agents.architecture.apply_skills",
+            ) as mock_apply,
+        ):
+            build_architecture_chain(CouncilConfig(), registry=None)
+
+        mock_apply.assert_not_called()
 
 
 class TestRunArchitectureAgent:

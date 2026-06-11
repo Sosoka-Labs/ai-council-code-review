@@ -13,6 +13,9 @@ from ai_council_review.llm.agents.output_models import FindingList
 from ai_council_review.llm.prompts.loader import load_prompt
 from ai_council_review.llm.providers.factory import LLMProviderFactory
 from ai_council_review.models import Finding, ReviewState
+from ai_council_review.skills import apply_skills
+from ai_council_review.skills.registry import SkillRegistry
+from ai_council_review.skills.resolution import resolve_skills_for_agent
 
 logger = structlog.get_logger()
 
@@ -53,11 +56,14 @@ def _build_agent_variables(state: ReviewState) -> dict[str, Any]:
 
 def build_architecture_chain(
     config: CouncilConfig,
+    registry: SkillRegistry | None = None,
 ) -> Runnable[dict[str, Any], Any]:
     """Build a simple LLM chain for the architecture agent.
 
     Args:
         config: Global council configuration.
+        registry: Optional skill registry. When provided, resolved skill bodies
+            are appended to the system prompt.
 
     Returns:
         Configured Runnable chain.
@@ -65,6 +71,9 @@ def build_architecture_chain(
     agent_config = config.agents.get("architecture", AgentConfig())
     llm = LLMProviderFactory.from_config(agent_config, config.providers)
     prompt = load_prompt("architecture")
+    if registry is not None:
+        skills = resolve_skills_for_agent("architecture", config, registry)
+        prompt = apply_skills(prompt, skills)
     return prompt | llm.with_structured_output(FindingList)
 
 
@@ -72,6 +81,7 @@ def run_architecture_agent(
     state: ReviewState,
     config: CouncilConfig,
     callbacks: list[Any] | None = None,
+    registry: SkillRegistry | None = None,
 ) -> list[Finding]:
     """Run the architecture agent and return findings.
 
@@ -79,12 +89,13 @@ def run_architecture_agent(
         state: Current review state.
         config: Council configuration.
         callbacks: Optional LangChain callbacks (e.g., CostCallbackHandler).
+        registry: Optional skill registry for skill injection.
 
     Returns:
         List of findings.
     """
     logger.info("Architecture agent starting")
-    chain = build_architecture_chain(config)
+    chain = build_architecture_chain(config, registry=registry)
 
     try:
         variables = _build_agent_variables(state)
