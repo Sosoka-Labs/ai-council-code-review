@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import sys
 import threading
@@ -32,10 +33,28 @@ _logging_configured = False
 
 
 def configure_logging() -> None:
-    """Configure structlog once; subsequent calls are no-ops."""
+    """Configure structlog once; subsequent calls are no-ops.
+
+    Wires a StreamHandler to the root logger at INFO so structlog records
+    (which route through structlog.stdlib.LoggerFactory and therefore through
+    Python's logging module) actually surface on stdout. Without this handler
+    every logger.info() call is silently dropped — including the per-agent
+    "skills attached" lines and every X agent starting/finished event.
+    """
     global _logging_configured
     if _logging_configured:
         return
+
+    # Idempotent root logger setup: only attach a handler if none exist.
+    root = logging.getLogger()
+    if not root.handlers:
+        handler = logging.StreamHandler(sys.stdout)
+        # structlog already formats the line; the stdlib formatter must pass
+        # the rendered message through verbatim.
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        root.addHandler(handler)
+    root.setLevel(os.environ.get("AI_COUNCIL_LOG_LEVEL", "INFO").upper())
+
     structlog.configure(
         processors=[
             structlog.stdlib.filter_by_level,
