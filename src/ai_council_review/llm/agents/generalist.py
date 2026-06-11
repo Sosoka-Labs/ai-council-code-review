@@ -14,9 +14,13 @@ from ai_council_review.llm.agents.parsing import parse_findings
 from ai_council_review.llm.prompts.loader import load_prompt
 from ai_council_review.llm.providers.factory import LLMProviderFactory
 from ai_council_review.models import Finding, ReviewState
-from ai_council_review.skills import apply_skills
+from ai_council_review.skills import Skill, apply_skills
 from ai_council_review.skills.registry import SkillRegistry
-from ai_council_review.skills.resolution import resolve_skills_for_agent
+from ai_council_review.skills.resolution import (
+    SkillMode,
+    bind_chain_metadata,
+    resolve_skills_for_agent,
+)
 
 logger = structlog.get_logger()
 
@@ -74,10 +78,15 @@ def build_generalist_executor(
     agent_config = config.agents.get("generalist", AgentConfig())
     llm = LLMProviderFactory.from_config(agent_config, config.providers)
     prompt = load_prompt("generalist")
+    skills: list[Skill] = []
+    skill_mode: SkillMode = "none"
     if registry is not None:
         skills = resolve_skills_for_agent("generalist", config, registry)
-        prompt = apply_skills(prompt, skills)
-    return prompt | llm
+        if skills:
+            prompt = apply_skills(prompt, skills)
+            skill_mode = "bodies"
+    chain = prompt | llm
+    return bind_chain_metadata(chain, "generalist", skills, skill_mode)
 
 
 def run_generalist_agent(

@@ -10,7 +10,7 @@ from ai_council_review.config import AgentConfig, CouncilConfig
 from ai_council_review.exceptions import ConfigError
 from ai_council_review.skills.models import Skill
 from ai_council_review.skills.registry import SkillRegistry
-from ai_council_review.skills.resolution import resolve_skills_for_agent
+from ai_council_review.skills.resolution import bind_chain_metadata, resolve_skills_for_agent
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -152,3 +152,56 @@ class TestResolveSkillsForAgent:
         mock_log.warning.assert_called_once()
         warning_call_kwargs = mock_log.warning.call_args
         assert "soft token budget" in warning_call_kwargs.args[0]
+
+
+class TestBindChainMetadata:
+    """bind_chain_metadata() attaches LangChain tags + metadata for observability."""
+
+    def _runnable(self) -> object:
+        """Return a trivial Runnable for wrapping."""
+        from langchain_core.runnables import RunnableLambda
+
+        return RunnableLambda(lambda x: x)
+
+    def test_attaches_agent_tag_and_metadata_with_skills(self) -> None:
+        """Returned runnable has agent + skills tags and ai_council.* metadata."""
+        skills = [_make_skill("oauth-pitfalls", body="some guidance " * 20)]
+
+        bound = bind_chain_metadata(self._runnable(), "security", skills, "bodies")
+
+        cfg = bound.config  # RunnableBinding exposes the bound config
+        assert "agent:security" in cfg["tags"]
+        assert "skills:bodies" in cfg["tags"]
+        meta = cfg["metadata"]
+        assert meta["ai_council.agent"] == "security"
+        assert meta["ai_council.skills.attached"] == ["oauth-pitfalls"]
+        assert meta["ai_council.skills.mode"] == "bodies"
+        assert meta["ai_council.skills.total_tokens"] > 0
+
+    def test_attaches_none_mode_when_no_skills(self) -> None:
+        """When skills list is empty, mode is 'none' and total_tokens is 0."""
+        bound = bind_chain_metadata(self._runnable(), "router", [], "none")
+
+        cfg = bound.config
+        assert "agent:router" in cfg["tags"]
+        assert "skills:none" in cfg["tags"]
+        meta = cfg["metadata"]
+        assert meta["ai_council.skills.attached"] == []
+        assert meta["ai_council.skills.mode"] == "none"
+        assert meta["ai_council.skills.total_tokens"] == 0
+
+    def test_emits_info_log_only_when_skills_attached(self) -> None:
+        """The structured INFO log fires only when at least one skill is attached."""
+        from unittest.mock import MagicMock, patch
+
+        with patch("ai_council_review.skills.resolution.log") as mock_log:
+            bind_chain_metadata(self._runnable(), "security", [], "none")
+        mock_log.info.assert_not_called()
+
+        with patch("ai_council_review.skills.resolution.log", MagicMock()) as mock_log:
+            bind_chain_metadata(self._runnable(), "security", [_make_skill("s1")], "bodies")
+        mock_log.info.assert_called_once()
+        kwargs = mock_log.info.call_args.kwargs
+        assert kwargs["agent"] == "security"
+        assert kwargs["mode"] == "bodies"
+        assert kwargs["names"] == ["s1"]

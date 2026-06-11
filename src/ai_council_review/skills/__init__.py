@@ -5,14 +5,20 @@ from ai_council_review.skills.injection import apply_skill_catalog, apply_skills
 from ai_council_review.skills.loader import parse_skill_file
 from ai_council_review.skills.models import Skill
 from ai_council_review.skills.registry import SkillRegistry
-from ai_council_review.skills.resolution import resolve_skills_for_agent
+from ai_council_review.skills.resolution import (
+    SkillMode,
+    bind_chain_metadata,
+    resolve_skills_for_agent,
+)
 
 __all__ = [
     "BudgetCheckResult",
     "Skill",
+    "SkillMode",
     "SkillRegistry",
     "apply_skill_catalog",
     "apply_skills",
+    "bind_chain_metadata",
     "check_skill_budget",
     "parse_skill_file",
     "resolve_skills_for_agent",

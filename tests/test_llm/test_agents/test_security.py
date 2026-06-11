@@ -143,6 +143,41 @@ class TestBuildSecurityChain:
         system_text = str(captured_prompts[0])
         assert "<!-- ai-council:skills:start -->" in system_text
 
+    def test_build_security_chain_emits_metadata_when_skills_attached(self) -> None:
+        """The returned chain carries agent + skills metadata for observability."""
+        mock_llm = MagicMock()
+        registry = _make_registry("auth-patterns")
+        config = CouncilConfig(default_agent_skills=["auth-patterns"])
+
+        with patch(
+            "ai_council_review.llm.agents.security.LLMProviderFactory.from_config",
+            return_value=mock_llm,
+        ):
+            chain = build_security_chain(config, registry=registry)
+
+        cfg = chain.config  # RunnableBinding exposes bound config
+        assert "agent:security" in cfg["tags"]
+        assert "skills:bodies" in cfg["tags"]
+        meta = cfg["metadata"]
+        assert meta["ai_council.agent"] == "security"
+        assert meta["ai_council.skills.attached"] == ["auth-patterns"]
+        assert meta["ai_council.skills.mode"] == "bodies"
+
+    def test_build_security_chain_emits_none_metadata_when_no_registry(self) -> None:
+        """Without a registry, the chain still tags itself agent:security, skills:none."""
+        mock_llm = MagicMock()
+
+        with patch(
+            "ai_council_review.llm.agents.security.LLMProviderFactory.from_config",
+            return_value=mock_llm,
+        ):
+            chain = build_security_chain(CouncilConfig())
+
+        cfg = chain.config
+        assert "agent:security" in cfg["tags"]
+        assert "skills:none" in cfg["tags"]
+        assert cfg["metadata"]["ai_council.skills.mode"] == "none"
+
     def test_build_security_chain_unchanged_when_registry_is_none(self) -> None:
         """Passing registry=None produces the same chain as the no-registry call."""
         mock_llm = MagicMock()

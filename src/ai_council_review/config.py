@@ -322,11 +322,24 @@ def validate_skill_budgets(
     Raises:
         ConfigError: When any agent's resolved skills exceed the hard token budget.
     """
+    import structlog
+
     from ai_council_review.skills.resolution import resolve_skills_for_agent
+
+    log = structlog.get_logger(__name__)
 
     for agent_name in CANONICAL_AGENTS:
         # resolve_skills_for_agent enforces both soft (warn) and hard (raise).
-        resolve_skills_for_agent(agent_name, config, registry)
+        skills = resolve_skills_for_agent(agent_name, config, registry)
+        # Emit a per-agent INFO summary at startup so operators can confirm
+        # the resolved bindings without grepping mid-run logs.
+        log.info(
+            "agent skill binding resolved",
+            agent=agent_name,
+            count=len(skills),
+            names=[s.name for s in skills],
+            total_tokens=sum(s.estimated_tokens() for s in skills),
+        )
 
 
 def validate_config(config: CouncilConfig) -> None:

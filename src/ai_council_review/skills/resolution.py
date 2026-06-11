@@ -6,12 +6,17 @@ This module is the single place that applies the config precedence rules
 
 from __future__ import annotations
 
+from typing import Any, Literal
+
 import structlog
+from langchain_core.runnables import Runnable
 
 from ai_council_review.exceptions import ConfigError
 from ai_council_review.skills.budget import check_skill_budget
 from ai_council_review.skills.models import Skill
 from ai_council_review.skills.registry import SkillRegistry
+
+SkillMode = Literal["bodies", "catalog", "none"]
 
 log = structlog.get_logger(__name__)
 
@@ -113,3 +118,55 @@ def resolve_skills_for_agent(
         )
 
     return skills
+
+
+def bind_chain_metadata(
+    chain: Runnable[Any, Any],
+    agent_name: str,
+    skills: list[Skill],
+    skill_mode: SkillMode,
+) -> Runnable[Any, Any]:
+    """Attach observability tags and metadata to an agent's chain.
+
+    Uses LangChain's idiomatic `Runnable.with_config(...)` so the metadata
+    surfaces in any registered callback handler (including LangSmith traces
+    when ``LANGSMITH_TRACING=true``). Also emits a structured INFO log so
+    operators see attachments in plain stdout/CI logs without needing a
+    callback handler attached.
+
+    Always tags the chain with ``agent:<name>``; emits the skills log line
+    only when at least one skill was attached (no-op for unbound agents).
+
+    Args:
+        chain: The composed Runnable returned by a ``build_X_chain`` function.
+        agent_name: Canonical agent name (e.g. "security", "router").
+        skills: Resolved Skill objects bound to this agent (may be empty).
+        skill_mode: ``"bodies"`` for specialists, ``"catalog"`` for the router,
+            ``"none"`` when no skills were attached.
+
+    Returns:
+        A new Runnable with tags and metadata bound. The underlying chain is
+        unchanged.
+    """
+    skill_names = [s.name for s in skills]
+    total_tokens = sum(s.estimated_tokens() for s in skills)
+
+    if skills:
+        log.info(
+            "skills attached to agent chain",
+            agent=agent_name,
+            mode=skill_mode,
+            count=len(skills),
+            names=skill_names,
+            total_tokens=total_tokens,
+        )
+
+    return chain.with_config(
+        tags=[f"agent:{agent_name}", f"skills:{skill_mode}"],
+        metadata={
+            "ai_council.agent": agent_name,
+            "ai_council.skills.attached": skill_names,
+            "ai_council.skills.mode": skill_mode,
+            "ai_council.skills.total_tokens": total_tokens,
+        },
+    )

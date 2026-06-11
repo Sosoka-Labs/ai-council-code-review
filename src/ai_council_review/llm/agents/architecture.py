@@ -13,9 +13,13 @@ from ai_council_review.llm.agents.output_models import FindingList
 from ai_council_review.llm.prompts.loader import load_prompt
 from ai_council_review.llm.providers.factory import LLMProviderFactory
 from ai_council_review.models import Finding, ReviewState
-from ai_council_review.skills import apply_skills
+from ai_council_review.skills import Skill, apply_skills
 from ai_council_review.skills.registry import SkillRegistry
-from ai_council_review.skills.resolution import resolve_skills_for_agent
+from ai_council_review.skills.resolution import (
+    SkillMode,
+    bind_chain_metadata,
+    resolve_skills_for_agent,
+)
 
 logger = structlog.get_logger()
 
@@ -71,10 +75,15 @@ def build_architecture_chain(
     agent_config = config.agents.get("architecture", AgentConfig())
     llm = LLMProviderFactory.from_config(agent_config, config.providers)
     prompt = load_prompt("architecture")
+    skills: list[Skill] = []
+    skill_mode: SkillMode = "none"
     if registry is not None:
         skills = resolve_skills_for_agent("architecture", config, registry)
-        prompt = apply_skills(prompt, skills)
-    return prompt | llm.with_structured_output(FindingList)
+        if skills:
+            prompt = apply_skills(prompt, skills)
+            skill_mode = "bodies"
+    chain = prompt | llm.with_structured_output(FindingList)
+    return bind_chain_metadata(chain, "architecture", skills, skill_mode)
 
 
 def run_architecture_agent(
