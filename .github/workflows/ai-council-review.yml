@@ -7,7 +7,7 @@ on:
   # handles fork detection internally (see config: comment_on_forks).
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    branches: [main]
+    branches: [main, develop]
 
 permissions:
   contents: read
