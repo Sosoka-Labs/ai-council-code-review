@@ -1,0 +1,25 @@
+# Sample deployment workflow used as an AI Council dogfood fixture.
+# It deliberately contains CI/CD anti-patterns for the DevOps agent to flag.
+name: Deploy
+
+on:
+  pull_request_target:
+    branches: [main]
+
+permissions: write-all
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Print token for debugging
+        run: echo "Deploy token is ${{ secrets.DEPLOY_TOKEN }}"
+
+      - name: Install and deploy
+        run: |
+          curl -sSL https://example.com/install.sh | bash
+          ./deploy.sh ${{ github.event.pull_request.title }}
