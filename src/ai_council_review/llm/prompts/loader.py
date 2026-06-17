@@ -13,6 +13,9 @@ _REGISTRY: dict[str, ChatPromptTemplate] = {
     "generalist": templates.GENERALIST,
     "synthesis": templates.SYNTHESIS,
     "architecture": templates.ARCHITECTURE,
+    "performance": templates.PERFORMANCE,
+    "documentation": templates.DOCUMENTATION,
+    "devops": templates.DEVOPS,
 }
 
 
@@ -20,7 +23,7 @@ def load_prompt(name: str) -> ChatPromptTemplate:
     """Load a chat prompt template by name.
 
     Args:
-        name: Prompt name (e.g., ``"generalist"``).
+        name: Prompt name (e.g., ``"security"``).
 
     Returns:
         A :class:`~langchain_core.prompts.ChatPromptTemplate` configured

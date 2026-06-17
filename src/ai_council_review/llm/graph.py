@@ -12,10 +12,9 @@ from ai_council_review.config import AgentConfig, CouncilConfig
 from ai_council_review.github.client import GitHubClient
 from ai_council_review.github.ingestor import PRIngestor
 from ai_council_review.github.publisher import Publisher
-from ai_council_review.llm.agents.architecture import run_architecture_agent
-from ai_council_review.llm.agents.quality import run_quality_agent
+from ai_council_review.llm.agents.registry import SPECIALIST_AGENTS, SPECIALIST_BY_NAME
 from ai_council_review.llm.agents.router import run_router_agent
-from ai_council_review.llm.agents.security import run_security_agent
+from ai_council_review.llm.agents.specialist import run_specialist_agent
 from ai_council_review.llm.agents.synthesis import run_synthesis_agent
 from ai_council_review.llm.cost_tracker import CostCallbackHandler, CostTracker
 from ai_council_review.models import FileInfo, Finding, ReviewComment, ReviewState
@@ -23,6 +22,10 @@ from ai_council_review.skills.registry import SkillRegistry
 from ai_council_review.utils.patch_parser import get_position_for_line
 
 logger = structlog.get_logger()
+
+# Max specialists when review_depth == "standard" (M4 guardrail).
+# "deep" depth is uncapped so all requested specialists can run in parallel.
+_MAX_SPECIALISTS_STANDARD = 4
 
 
 def ingest_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
@@ -109,15 +112,29 @@ def router_node(
 
     result = run_router_agent(state, config, registry=registry)
 
+    # M4 guardrail: cap parallel specialists for standard depth.
+    # "deep" depth is intentionally uncapped to allow all requested specialists.
+    agents_needed = result.agents_needed
+    review_depth = result.review_depth
+    if review_depth == "standard":
+        agents_needed = agents_needed[:_MAX_SPECIALISTS_STANDARD]
+        if len(result.agents_needed) > _MAX_SPECIALISTS_STANDARD:
+            logger.info(
+                "M4: capped specialists for review depth",
+                depth=review_depth,
+                original=result.agents_needed,
+                capped=agents_needed,
+            )
+
     logger.info(
         "Router complete",
-        agents=result.agents_needed,
-        depth=result.review_depth,
+        agents=agents_needed,
+        depth=review_depth,
     )
 
     return {
-        "agents_needed": result.agents_needed,
-        "review_depth": result.review_depth,
+        "agents_needed": agents_needed,
+        "review_depth": review_depth,
     }
 
 
@@ -139,7 +156,11 @@ def _make_cost_callback(
     if cost_tracker is None:
         return None
     agent_config = config.agents.get(agent_name, AgentConfig())
-    assert agent_config.model_name is not None  # guaranteed by AgentConfig validator
+    if agent_config.model_name is None:
+        raise ValueError(
+            f"model_name must not be None for agent '{agent_name}' — "
+            "this is a bug in AgentConfig validator"
+        )
     handler = CostCallbackHandler(
         cost_tracker=cost_tracker,
         agent_name=agent_name,
@@ -149,85 +170,34 @@ def _make_cost_callback(
     return [handler]
 
 
-def security_node(
-    state: ReviewState,
+def _make_specialist_node(
+    agent_name: str,
     config: CouncilConfig,
-    cost_tracker: CostTracker | None = None,
-    registry: SkillRegistry | None = None,
-) -> dict[str, Any]:
-    """Run the security agent.
+    cost_tracker: CostTracker | None,
+    registry: SkillRegistry | None,
+) -> Any:
+    """Factory that returns a callable graph node for the given specialist.
 
     Args:
-        state: Current review state.
+        agent_name: Agent name matching an entry in SPECIALIST_BY_NAME.
         config: Council configuration.
-        cost_tracker: Optional cost tracker for budget enforcement.
-        registry: Optional skill registry for skill injection.
+        cost_tracker: Optional cost tracker.
+        registry: Optional skill registry.
 
     Returns:
-        Updates to the state.
+        Callable ``(state) -> dict`` for LangGraph.
     """
-    if state.skipped:
-        return {}
+    spec = SPECIALIST_BY_NAME[agent_name]
 
-    callbacks = _make_cost_callback(cost_tracker, "security", config)
-    findings = run_security_agent(state, config, callbacks=callbacks, registry=registry)
-    return {
-        "agent_outputs": {"security": findings},
-    }
+    def _node(state: ReviewState) -> dict[str, Any]:
+        if state.skipped:
+            return {}
+        callbacks = _make_cost_callback(cost_tracker, agent_name, config)
+        findings = run_specialist_agent(spec, state, config, callbacks=callbacks, registry=registry)
+        return {"agent_outputs": {agent_name: findings}}
 
-
-def quality_node(
-    state: ReviewState,
-    config: CouncilConfig,
-    cost_tracker: CostTracker | None = None,
-    registry: SkillRegistry | None = None,
-) -> dict[str, Any]:
-    """Run the quality agent.
-
-    Args:
-        state: Current review state.
-        config: Council configuration.
-        cost_tracker: Optional cost tracker for budget enforcement.
-        registry: Optional skill registry for skill injection.
-
-    Returns:
-        Updates to the state.
-    """
-    if state.skipped:
-        return {}
-
-    callbacks = _make_cost_callback(cost_tracker, "quality", config)
-    findings = run_quality_agent(state, config, callbacks=callbacks, registry=registry)
-    return {
-        "agent_outputs": {"quality": findings},
-    }
-
-
-def architecture_node(
-    state: ReviewState,
-    config: CouncilConfig,
-    cost_tracker: CostTracker | None = None,
-    registry: SkillRegistry | None = None,
-) -> dict[str, Any]:
-    """Run the architecture agent.
-
-    Args:
-        state: Current review state.
-        config: Council configuration.
-        cost_tracker: Optional cost tracker for budget enforcement.
-        registry: Optional skill registry for skill injection.
-
-    Returns:
-        Updates to the state.
-    """
-    if state.skipped:
-        return {}
-
-    callbacks = _make_cost_callback(cost_tracker, "architecture", config)
-    findings = run_architecture_agent(state, config, callbacks=callbacks, registry=registry)
-    return {
-        "agent_outputs": {"architecture": findings},
-    }
+    _node.__name__ = f"{agent_name}_node"
+    return _node
 
 
 def synthesis_node(
@@ -413,18 +383,25 @@ def post_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
 def _route_from_router(state: ReviewState) -> list[str]:
     """Determine which agents to run based on router output.
 
+    Filters the router's agent list to only those present in the registry so
+    unknown names from the LLM are silently dropped rather than causing a graph
+    routing error.
+
     Args:
         state: Current review state.
 
     Returns:
         List of agent node names to execute.
     """
-    valid_agents = {"security", "quality", "architecture"}
-    return [a for a in state.agents_needed if a in valid_agents]
+    return [a for a in state.agents_needed if a in SPECIALIST_BY_NAME]
 
 
 def build_graph(config: CouncilConfig, registry: SkillRegistry | None = None) -> Any:
     """Build the LangGraph state machine with multi-agent routing.
+
+    The graph is built entirely from ``SPECIALIST_AGENTS`` — adding a new agent
+    to the registry automatically produces a new node and fan-in edge here without
+    any further changes to this function.
 
     Args:
         config: Council configuration.
@@ -440,42 +417,37 @@ def build_graph(config: CouncilConfig, registry: SkillRegistry | None = None) ->
     # Initialize cost tracker for the entire graph run
     cost_tracker = CostTracker(config)
 
-    # Nodes — registry is closed over in each lambda so the same registry
-    # instance is shared across all nodes without threading it through state.
+    # Fixed nodes
     workflow.add_node("ingest", lambda state: ingest_node(state, config))
     workflow.add_node("router", lambda state: router_node(state, config, registry=registry))
-    workflow.add_node(
-        "security", lambda state: security_node(state, config, cost_tracker, registry=registry)
-    )
-    workflow.add_node(
-        "quality", lambda state: quality_node(state, config, cost_tracker, registry=registry)
-    )
-    workflow.add_node(
-        "architecture",
-        lambda state: architecture_node(state, config, cost_tracker, registry=registry),
-    )
-    workflow.add_node("synthesis_agent", lambda state: synthesis_node(state, config, cost_tracker))
+    workflow.add_node("synthesis", lambda state: synthesis_node(state, config, cost_tracker))
     workflow.add_node("post", lambda state: post_node(state, config))
+
+    # Specialist nodes — built from the registry so adding an AgentSpec is enough.
+    specialist_names: list[str] = []
+    for spec in SPECIALIST_AGENTS:
+        workflow.add_node(
+            spec.name,
+            _make_specialist_node(spec.name, config, cost_tracker, registry),
+        )
+        specialist_names.append(spec.name)
 
     # Edges
     workflow.add_edge(START, "ingest")
     workflow.add_edge("ingest", "router")
 
-    # Conditional routing from router — agents are selected dynamically
-    # based on the router's agents_needed output.
+    # Conditional routing from router — agents are selected dynamically.
     workflow.add_conditional_edges(
         "router",
         _route_from_router,
-        ["security", "quality", "architecture"],
+        specialist_names,
     )
 
-    # Parallel agents converge to synthesis
-    workflow.add_edge("security", "synthesis_agent")
-    workflow.add_edge("quality", "synthesis_agent")
-    workflow.add_edge("architecture", "synthesis_agent")
+    # All specialist nodes converge to synthesis.
+    for name in specialist_names:
+        workflow.add_edge(name, "synthesis")
 
-    # Synthesis -> post
-    workflow.add_edge("synthesis_agent", "post")
+    workflow.add_edge("synthesis", "post")
     workflow.add_edge("post", END)
 
     return workflow.compile()

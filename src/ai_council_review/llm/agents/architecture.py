@@ -1,61 +1,26 @@
-"""Architecture agent — focused on cross-file impact, API design, and structural consistency."""
+"""Architecture agent shim — delegates to the parameterized specialist runner.
+
+This module exists for backwards compatibility.  New code should import
+``build_specialist_chain`` / ``run_specialist_agent`` from ``specialist.py``
+directly and pass the registry's ``AgentSpec`` for the desired agent.
+"""
 
 from __future__ import annotations
 
 from typing import Any
 
-import structlog
 from langchain_core.runnables import Runnable
 
-from ai_council_review.config import AgentConfig, CouncilConfig
-from ai_council_review.exceptions import BudgetExceededError
-from ai_council_review.llm.agents.output_models import FindingList
-from ai_council_review.llm.prompts.loader import load_prompt
-from ai_council_review.llm.providers.factory import LLMProviderFactory
-from ai_council_review.models import Finding, ReviewState
-from ai_council_review.skills import Skill, apply_skills
-from ai_council_review.skills.registry import SkillRegistry
-from ai_council_review.skills.resolution import (
-    SkillMode,
-    bind_chain_metadata,
-    resolve_skills_for_agent,
+from ai_council_review.config import CouncilConfig
+from ai_council_review.llm.agents.registry import SPECIALIST_BY_NAME
+from ai_council_review.llm.agents.specialist import (
+    build_specialist_chain,
+    run_specialist_agent,
 )
+from ai_council_review.models import Finding, ReviewState
+from ai_council_review.skills.registry import SkillRegistry
 
-logger = structlog.get_logger()
-
-
-def _build_agent_variables(state: ReviewState) -> dict[str, Any]:
-    """Build prompt variables from review state.
-
-    Args:
-        state: Current review state.
-
-    Returns:
-        Dict of prompt template variables.
-    """
-    changed_files = state.changed_files
-    file_list = "\n".join(
-        f"- {f.filename} ({f.status}, +{f.additions}/-{f.deletions})" for f in changed_files
-    )
-
-    diff_parts: list[str] = []
-    for f in changed_files:
-        if f.patch:
-            diff_parts.append(f"=== {f.filename} ===\n{f.patch}")
-    diff_text = "\n\n".join(diff_parts)
-
-    pr = state.pr_metadata
-    pr_title = pr.title if pr else ""
-    pr_number = pr.number if pr else 0
-    repo = pr.html_url if pr else ""
-
-    return {
-        "repo": repo,
-        "pr_number": pr_number,
-        "pr_title": pr_title,
-        "changed_files": file_list,
-        "diff": diff_text,
-    }
+_SPEC = SPECIALIST_BY_NAME["architecture"]
 
 
 def build_architecture_chain(
@@ -66,24 +31,12 @@ def build_architecture_chain(
 
     Args:
         config: Global council configuration.
-        registry: Optional skill registry. When provided, resolved skill bodies
-            are appended to the system prompt.
+        registry: Optional skill registry.
 
     Returns:
         Configured Runnable chain.
     """
-    agent_config = config.agents.get("architecture", AgentConfig())
-    llm = LLMProviderFactory.from_config(agent_config, config.providers)
-    prompt = load_prompt("architecture")
-    skills: list[Skill] = []
-    skill_mode: SkillMode = "none"
-    if registry is not None:
-        skills = resolve_skills_for_agent("architecture", config, registry)
-        if skills:
-            prompt = apply_skills(prompt, skills)
-            skill_mode = "bodies"
-    chain = prompt | llm.with_structured_output(FindingList)
-    return bind_chain_metadata(chain, "architecture", skills, skill_mode)
+    return build_specialist_chain(_SPEC, config, registry=registry)
 
 
 def run_architecture_agent(
@@ -97,26 +50,10 @@ def run_architecture_agent(
     Args:
         state: Current review state.
         config: Council configuration.
-        callbacks: Optional LangChain callbacks (e.g., CostCallbackHandler).
-        registry: Optional skill registry for skill injection.
+        callbacks: Optional LangChain callbacks.
+        registry: Optional skill registry.
 
     Returns:
         List of findings.
     """
-    logger.info("Architecture agent starting")
-    chain = build_architecture_chain(config, registry=registry)
-
-    try:
-        variables = _build_agent_variables(state)
-        run_config = {"callbacks": callbacks} if callbacks else None
-        result = chain.invoke(variables, config=run_config)  # type: ignore[arg-type]
-        findings = result.findings if isinstance(result, FindingList) else []
-        for f in findings:
-            f.agent = "architecture"
-        logger.info("Architecture agent finished", findings=len(findings))
-        return findings
-    except BudgetExceededError:
-        raise
-    except Exception as e:
-        logger.error("Architecture agent failed", error=str(e))
-        return []
+    return run_specialist_agent(_SPEC, state, config, callbacks=callbacks, registry=registry)

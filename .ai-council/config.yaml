@@ -1,10 +1,12 @@
-# AI Council — OpenAI pipeline test configuration
-# All agents routed to OpenAI. gpt-4o-mini for cheap classification nodes,
-# gpt-4o for specialist reviewers.
+# AI Council — self-dogfood configuration
+# Routes every agent to Fireworks.ai (the default provider) so the council can
+# review its own pull requests with the FIREWORKS_API_KEY repository secret.
+# Specialists use Llama 3.1 70B; the router and synthesis nodes use the cheaper
+# 8B model for fast classification/merging.
 
 version: "1"
 
-review_depth: standard
+review_depth: deep              # uncapped — let every relevant specialist run on our own PRs
 max_files: 60
 max_lines: 3000
 max_diff_size: 150000
@@ -17,6 +19,7 @@ skip_patterns:
   - "package-lock.json"
   - "yarn.lock"
   - "poetry.lock"
+  - "uv.lock"
   - "*.snap"
   - "dist/"
   - "build/"
@@ -29,43 +32,64 @@ total_timeout_seconds: 600
 debug: true
 
 agents:
-  # router and synthesis use the OpenAI provider default (gpt-4o-mini) —
-  # cheap, fast classification. Omitting model_name keeps the config terse.
+  # Cheap, fast classification/merge nodes.
   router:
     enabled: true
-    model: openai
+    model: fireworks
+    model_name: fireworks/llama-3.1-8b
     temperature: 0.1
     max_tokens: 2000
 
-  # Specialists pick a stronger model explicitly.
-  security:
+  synthesis:
     enabled: true
-    model: openai
-    model_name: openai/gpt-4o
+    model: fireworks
+    model_name: fireworks/llama-3.1-8b
     temperature: 0.2
     max_tokens: 16000
-    skills: [oauth-pitfalls]   # bind the bundled demo skill to this agent
+
+  # Specialists — stronger model, each with its bound domain skill.
+  security:
+    enabled: true
+    model: fireworks
+    model_name: fireworks/llama-3.1-70b
+    temperature: 0.2
+    max_tokens: 16000
+    skills: [oauth-pitfalls]
 
   quality:
     enabled: true
-    model: openai
-    model_name: openai/gpt-4o
+    model: fireworks
+    model_name: fireworks/llama-3.1-70b
     temperature: 0.3
     max_tokens: 16000
 
   architecture:
     enabled: true
-    model: openai
-    model_name: openai/gpt-4o
+    model: fireworks
+    model_name: fireworks/llama-3.1-70b
     temperature: 0.3
     max_tokens: 16000
 
-  synthesis:
+  performance:
     enabled: true
-    model: openai
-    temperature: 0.2
+    model: fireworks
+    model_name: fireworks/llama-3.1-70b
+    temperature: 0.3
     max_tokens: 16000
+    skills: [n-plus-one]
 
-providers:
-  openai:
-    api_key: null
+  documentation:
+    enabled: true
+    model: fireworks
+    model_name: fireworks/llama-3.1-70b
+    temperature: 0.3
+    max_tokens: 16000
+    skills: [docstring-style]
+
+  devops:
+    enabled: true
+    model: fireworks
+    model_name: fireworks/llama-3.1-70b
+    temperature: 0.3
+    max_tokens: 16000
+    skills: [github-actions-hardening]

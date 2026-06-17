@@ -2,16 +2,30 @@
 
 Tools are created via factory functions that bind a
 :class:`~ai_council_review.github.browser.RepositoryBrowser` instance.
+
+Security notes:
+    * ``read_file`` truncates responses at ``_MAX_FILE_BYTES`` to prevent large
+      binary or generated files from exhausting the LLM context.
+    * The agentic tool loop in ``specialist.py`` enforces a ceiling on the total
+      number of tool calls per agent (``_MAX_TOOL_CALLS``), so the tools below
+      do not need to duplicate that check.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import structlog
 from langchain_core.tools import BaseTool, tool
 
 if TYPE_CHECKING:
     from ai_council_review.github.browser import RepositoryBrowser
+
+logger = structlog.get_logger()
+
+# Hard cap on ``read_file`` response size.  Files larger than this are truncated
+# with a clear marker so the model knows the content is incomplete.
+_MAX_FILE_BYTES: int = 100_000
 
 
 def make_repository_tools(browser: RepositoryBrowser | None) -> list[BaseTool]:
@@ -21,15 +35,15 @@ def make_repository_tools(browser: RepositoryBrowser | None) -> list[BaseTool]:
         browser: RepositoryBrowser instance. If None, returns an empty list.
 
     Returns:
-        List of LangChain tools.
+        List of LangChain tools: ``read_file``, ``list_files``, ``find_files``.
     """
     if browser is None:
         return []
 
     tools: list[BaseTool] = [_make_read_file_tool(browser)]
 
-    # list_files and find_files are only used by architecture agent currently,
-    # but we include them for all tool-enabled agents for consistency.
+    # list_files and find_files are useful for all tool-enabled agents, not
+    # just architecture, so we include them for consistency.
     tools.append(_make_list_files_tool(browser))
     tools.append(_make_find_files_tool(browser))
 
@@ -37,7 +51,11 @@ def make_repository_tools(browser: RepositoryBrowser | None) -> list[BaseTool]:
 
 
 def _make_read_file_tool(browser: RepositoryBrowser) -> BaseTool:
-    """Create a ``read_file`` tool bound to *browser*."""
+    """Create a ``read_file`` tool bound to *browser*.
+
+    The tool truncates file contents at ``_MAX_FILE_BYTES`` and appends a clear
+    marker so the model knows the file was cut short.
+    """
 
     @tool
     def read_file(path: str, ref: str = "HEAD") -> str:
@@ -52,11 +70,23 @@ def _make_read_file_tool(browser: RepositoryBrowser) -> BaseTool:
             ref: Git ref (branch, tag, or commit SHA). Defaults to HEAD.
 
         Returns:
-            File contents as a string, or an error message.
+            File contents as a string (truncated at 100 000 bytes), or an error
+            message when the file does not exist.
         """
         result = browser.get_file(path, ref)
         if result is None:
             return f"File not found: {path} at {ref}"
+        if len(result) > _MAX_FILE_BYTES:
+            logger.debug(
+                "read_file truncating large file",
+                path=path,
+                original_bytes=len(result),
+                cap_bytes=_MAX_FILE_BYTES,
+            )
+            result = result[:_MAX_FILE_BYTES] + (
+                f"\n\n[... truncated at {_MAX_FILE_BYTES} bytes — "
+                "file continues beyond this point ...]"
+            )
         return result
 
     return read_file

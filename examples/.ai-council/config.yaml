@@ -76,13 +76,47 @@ agents:
     max_tokens: 16000
 
   # Architecture checks cross-file impact, documentation freshness, API consistency,
-  # and dependency alignment. This is the primary agent for repository browsing.
+  # and dependency alignment.
   architecture:
     enabled: true
     model: fireworks
     model_name: fireworks/llama-3.1-70b
     temperature: 0.3
     max_tokens: 16000
+
+  # Performance detects N+1 queries, unbounded result sets, O(n²) patterns,
+  # sync I/O on hot paths, and missing caching/indexes.
+  # Triggered when ORM, DB queries, loops over collections, or data-pipeline
+  # code appears in the diff.
+  performance:
+    enabled: true
+    model: fireworks
+    model_name: fireworks/llama-3.1-70b
+    temperature: 0.3
+    max_tokens: 16000
+    skills: [n-plus-one]                 # bind N+1 detection guidance
+
+  # Documentation checks for stale docstrings vs changed signatures, missing
+  # docstrings on new public APIs, changelog gaps, and broken examples.
+  # Triggered when *.md, public function/class signatures, or new exports change.
+  documentation:
+    enabled: true
+    model: fireworks
+    model_name: fireworks/llama-3.1-70b
+    temperature: 0.3
+    max_tokens: 16000
+    skills: [docstring-style]            # bind docstring style guidance
+
+  # DevOps reviews GitHub Actions workflows, Dockerfiles, Terraform, shell
+  # scripts, and CI/CD configuration for security and correctness issues.
+  # Triggered when .github/workflows/*, Dockerfile, *.tf, *.sh files change.
+  devops:
+    enabled: true
+    model: fireworks
+    model_name: fireworks/llama-3.1-70b
+    temperature: 0.3
+    max_tokens: 16000
+    skills: [github-actions-hardening]   # bind Actions hardening guidance
 
   # Synthesis merges all agent outputs, deduplicates, prioritizes, and formats
   # the final review. Use a strong reasoning model here.
@@ -118,8 +152,11 @@ agents:
 # skills_token_budget_soft: 8000        # warn if an agent's total skill bodies exceed
 # skills_token_budget_hard: 16000       # error if an agent's total skill bodies exceed
 #
-# The example below binds the bundled oauth-pitfalls skill to the security
-# agent. Add your own skills under .ai-council/skills/ and reference them here.
+# Bundled skills in this example:
+#   oauth-pitfalls          → security agent: OAuth 2.0 / JWT review guidance
+#   n-plus-one              → performance agent: N+1 query and ORM patterns
+#   docstring-style         → documentation agent: Google-style docstring conventions
+#   github-actions-hardening → devops agent: Actions security and correctness
 
 # ── LLM Provider Settings ───────────────────────────────────────────────────
 # API keys are loaded from environment variables (FIREWORKS_API_KEY, etc.)

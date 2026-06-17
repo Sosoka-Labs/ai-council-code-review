@@ -6,7 +6,9 @@
 
 ## 1. Project Overview
 
-**AI Council Code Review** is a configurable, multi-agent AI code review system for GitHub Actions. It runs specialized LangGraph/LangChain agents to review pull requests, with the key differentiator being **cross-file awareness**: agents can browse the repository in real-time to check unchanged files for consistency.
+**AI Council Code Review** is a configurable, multi-agent AI code review system for GitHub Actions. It runs specialized LangGraph/LangChain agents to review pull requests, with the key differentiator being **cross-file awareness**: agents can browse the repository in real-time (when a GitHub token is present) to check unchanged files for consistency, degrading to diff-only review otherwise.
+
+**Agent roster:** six specialists — `security`, `quality`, `architecture`, `performance`, `documentation`, `devops` — plus a `router` (gates which specialists run per PR) and a `synthesis` agent (dedupes, prioritizes, emits the final verdict). The specialists are declared once in `src/ai_council_review/llm/agents/registry.py` (`SPECIALIST_AGENTS`); the graph, router catalog, synthesis categories, and valid-agent filter all derive from that tuple. A single parameterized runner (`llm/agents/specialist.py`) implements all six.
 
 **Key Constraints:**
 - v1 is **stateless** — no persistence layer, no vector store, no graph DB
@@ -85,25 +87,34 @@ mypy src/ai_council_review
 
 ## 4. Git Workflow & Branching Strategy
 
-### 4.1 Branch Model: GitHub Flow (Simplified)
+### 4.1 Branch Model: Gitflow-Lite
 
-We use a **two-branch model** with short-lived feature branches:
+We use a **two-long-lived-branch model**:
 
 ```
-main        ← Production-ready, protected, requires PR review
+main      ← Release branch. Tagged from here. Only receives merges from develop.
   │
-  ├── feature/the-feature    ← Feature branches from main
-  ├── bugfix/the-bugfix      ← Bugfix branches from main
-  ├── hotfix/urgent-fix      ← Hotfix branches (rare)
+develop   ← Integration branch. All feature/bugfix branches target here.
+  │
+  ├── feature/the-feature    ← Branch from develop, PR back into develop
+  ├── bugfix/the-bugfix      ← Branch from develop, PR back into develop
+  ├── hotfix/urgent-fix      ← Hotfix branches (rare; may target main directly)
   └── docs/readme-update     ← Documentation branches
 ```
 
 **Key Rules:**
-- `main` is the **only long-lived branch** and is always deployable
-- All work happens on short-lived feature/bugfix branches
-- No `develop` branch — we keep it simple with trunk-based development
-- All changes to `main` go through **Pull Request + review**
+- `develop` is the **integration branch** where all day-to-day work lands
+- `main` is the **release branch** — only receives merges from `develop` at release time
+- Tags (`v1.0.0`, `v1.1.0`, etc.) are always cut from `main`
+- All changes require a **Pull Request + CI green + review**; no direct pushes
 - Branch names follow the pattern: `type/descriptive-name`
+
+**Contributor flow:**
+1. `git checkout -b feature/my-feature develop`
+2. Open PR targeting **`develop`** (not `main`)
+3. Ensure CI passes (tests, lint, type check)
+4. After review, merge into `develop`
+5. At release time: `develop` → `main` (PR) → tag → GitHub Release created by `release.yml`
 
 ### 4.2 Branch Naming Conventions
 
@@ -149,10 +160,10 @@ test: add unit tests for synthesis agent deduplication
 
 ### 4.4 Pull Request Process
 
-1. **Create branch:** `git checkout -b feature/my-feature main`
+1. **Create branch:** `git checkout -b feature/my-feature develop`
 2. **Make commits:** Small, focused commits with clear messages
 3. **Push branch:** `git push origin feature/my-feature`
-4. **Open PR:** Target `main`, fill out PR template
+4. **Open PR:** Target **`develop`** (not `main`), fill out PR template
 5. **Ensure CI passes:** All tests, lint, type checks must be green
 6. **Request review:** At least one approval required
 7. **Merge:** Use "Squash and merge" or "Rebase and merge" (no merge commits)
@@ -222,7 +233,9 @@ Brief description of what this PR does.
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| `ci.yml` | PR to `main`, push to `main` | Run tests, lint, type check |
+| `ci.yml` | PR to `main` or `develop`, push to `main` or `develop` | Run tests, lint, type check |
+| `codeql.yml` | PR to `main` or `develop`, push to `main` or `develop`, weekly schedule | CodeQL security analysis |
+| `release.yml` | Push of `v*.*.*` tag (tags are cut from `main`) | Create GitHub Release |
 | `ai-council-review.yml` | PR to `main` | Self-dogfood — run our own review action on this repo |
 
 ### 6.2 CI Requirements
@@ -247,20 +260,22 @@ We run our own AI Council Review action on this repository. This is both:
 
 ```
 tests/
-├── test_config.py              # Config loading and validation
-├── test_github_client.py       # GitHub API client (mocked)
-├── test_repository_browser.py  # File reading tools
-├── test_pr_ingestor.py         # PR metadata ingestion
-├── test_agents/
-│   ├── test_router.py          # Router agent logic
-│   ├── test_security.py        # Security agent
-│   ├── test_quality.py         # Quality agent
-│   ├── test_architecture.py    # Architecture agent
-│   └── test_synthesis.py       # Synthesis agent
-└── fixtures/
-    ├── pr_payload.json
-    ├── changed_files.json
-    └── config.yaml
+├── test_config.py                  # Config loading and validation
+├── test_repository_browser.py      # File reading tools
+├── test_llm/
+│   ├── test_registry.py            # Specialist registry (single source of truth)
+│   └── test_agents/
+│       ├── test_router.py          # Router agent logic
+│       ├── test_specialist.py      # Parameterized specialist runner
+│       ├── test_security.py        # Security agent
+│       ├── test_quality.py         # Quality agent
+│       ├── test_architecture.py    # Architecture agent
+│       ├── test_performance.py     # Performance agent
+│       ├── test_documentation.py   # Documentation agent
+│       ├── test_devops.py          # DevOps agent
+│       └── test_synthesis.py       # Synthesis agent
+├── test_skills/                    # Skill discovery, registry, resolution
+└── dogfood/                        # Real security-issue tests against our own code
 ```
 
 ### 7.2 Testing Principles
@@ -284,10 +299,9 @@ tests/
 When working on this codebase, agents should follow these principles:
 
 ### 8.1 Before Writing Code
-1. Read `reference.md` for the full spec
-2. Read `AGENTS.md` (this file) for conventions
-3. Check the current branch — start from `main` if not specified
-4. Look at existing code in the same module to match style
+1. Read `AGENTS.md` (this file) for conventions
+2. Check the current branch — start from `develop` if not specified
+3. Look at existing code in the same module to match style
 
 ### 8.2 While Writing Code
 1. **Small, pure functions** — one responsibility per function
@@ -338,26 +352,54 @@ Load with `python-dotenv` in test scripts.
 
 ## 10. Common Tasks
 
-### 10.1 Adding a New Agent
+### 10.1 Adding a New Specialist Agent
 
-1. Create `src/ai_council_review/llm/agents/<agent_name>.py`
-2. Export `build_<agent_name>_executor(config, browser) -> AgentExecutor` (for tool agents) or `build_<agent_name>_chain(config) -> Runnable` (for single-shot agents)
-3. Export `run_<agent_name>_agent(state, config, ...) -> list[Finding]`
-4. Add prompt template to `src/ai_council_review/llm/prompts/templates.py` (use `ChatPromptTemplate` with `MessagesPlaceholder` for tool agents)
-5. Add agent config to `config.py` (Pydantic model)
-6. Add agent to the default config YAML
-7. Register agent in `graph.py`
-8. Add tests in `tests/test_agents/test_<agent_name>.py`
-9. Update `reference.md` agent documentation
+Specialists are **registry-driven**. All six share one implementation
+(`llm/agents/specialist.py`); the graph, router catalog, synthesis categories,
+and valid-agent filter all derive from `SPECIALIST_AGENTS` at import time. You do
+**not** edit `graph.py`, the router prompt, or the synthesis prompt — they update
+automatically.
+
+To add an agent:
+
+1. **Append one `AgentSpec(...)`** to the `SPECIALIST_AGENTS` tuple in
+   `src/ai_council_review/llm/agents/registry.py`. Set `name`, `prompt_key`
+   (usually `== name`), `category`, default temperature/max-tokens, and a
+   `router_hint` (a one-line description of when the router should select this
+   agent — it is injected into the router's agent catalog).
+2. **Add the prompt:** define a new `ChatPromptTemplate` constant in
+   `src/ai_council_review/llm/prompts/templates.py`, then register it under the
+   agent's `prompt_key` in the `_REGISTRY` dict in
+   `src/ai_council_review/llm/prompts/loader.py`.
+3. **Add a focused test** in `tests/test_llm/test_agents/test_<agent_name>.py`
+   (and assert the spec is wired into the registry in
+   `tests/test_llm/test_registry.py`).
+4. **(Optional) Ship domain knowledge:** drop a `SKILL.md` under
+   `.ai-council/skills/<name>/` and bind it to the agent via `skills: [...]` in
+   `.ai-council/config.yaml`. See the [README Skills section] for the binding
+   patterns.
+
+That's it — `build_graph()` reads `SPECIALIST_AGENTS` and produces the new node,
+conditional edge, and fan-in to synthesis with no further changes.
+
+[README Skills section]: README.md#skills--binding-domain-knowledge-to-agents
 
 ### 10.2 Adding a New LLM Provider
 
-1. Add `langchain-<provider>` to `pyproject.toml` dependencies
-2. Add provider config to `config.py`
-3. Add provider to `providers` section in default config YAML
-4. Update `LLMProviderFactory` in `llm_provider.py`
-5. Add provider to workflow env vars
-6. Update tests
+Providers are resolved in `src/ai_council_review/llm/providers/factory.py`
+(`LLMProviderFactory`), which maps a provider name to a LangChain `BaseChatModel`
+subclass. Because every agent uses the `BaseChatModel` interface, no agent-level
+changes are needed.
+
+1. Add `langchain-<provider>` to `pyproject.toml` dependencies.
+2. Import the chat model and add it to the `_PROVIDERS` map in
+   `LLMProviderFactory` (`llm/providers/factory.py`); wire its API-key kwarg in
+   `create()`.
+3. (Optional) Add shorthand model aliases for the provider to the alias map in
+   `config.py`.
+4. Add the provider's API key to the `providers` section of the
+   [example config](examples/.ai-council/config.yaml) and to the workflow env vars.
+5. Update tests (`tests/` — factory and config coverage).
 
 ### 10.3 Adding a New Tool to RepositoryBrowser
 
@@ -366,7 +408,7 @@ Repository browser tools live in `src/ai_council_review/llm/tools/` (LangChain `
 1. Add the tool function to `src/ai_council_review/llm/tools/repository.py`
 2. Register it in `make_repository_tools()`
 3. Update tests in `tests/test_repository_browser.py`
-4. Update `reference.md` if behavior is user-facing
+4. Update `README.md` if behavior is user-facing
 
 ---
 

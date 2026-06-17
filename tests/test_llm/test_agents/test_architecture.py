@@ -90,7 +90,7 @@ class TestBuildArchitectureChain:
         mock_llm = MagicMock()
 
         with patch(
-            "ai_council_review.llm.agents.architecture.LLMProviderFactory.from_config",
+            "ai_council_review.llm.agents.specialist.LLMProviderFactory.from_config",
             return_value=mock_llm,
         ):
             chain = build_architecture_chain(CouncilConfig())
@@ -104,11 +104,11 @@ class TestBuildArchitectureChain:
 
         with (
             patch(
-                "ai_council_review.llm.agents.architecture.LLMProviderFactory.from_config",
+                "ai_council_review.llm.agents.specialist.LLMProviderFactory.from_config",
                 return_value=mock_llm,
             ),
             patch(
-                "ai_council_review.llm.agents.architecture.apply_skills",
+                "ai_council_review.llm.agents.specialist.apply_skills",
                 wraps=lambda prompt, skills: prompt,
             ) as mock_apply,
         ):
@@ -125,11 +125,11 @@ class TestBuildArchitectureChain:
 
         with (
             patch(
-                "ai_council_review.llm.agents.architecture.LLMProviderFactory.from_config",
+                "ai_council_review.llm.agents.specialist.LLMProviderFactory.from_config",
                 return_value=mock_llm,
             ),
             patch(
-                "ai_council_review.llm.agents.architecture.apply_skills",
+                "ai_council_review.llm.agents.specialist.apply_skills",
             ) as mock_apply,
         ):
             build_architecture_chain(CouncilConfig(), registry=None)
@@ -146,7 +146,7 @@ class TestRunArchitectureAgent:
         mock_chain.invoke.return_value = _valid_finding_list()
 
         with patch(
-            "ai_council_review.llm.agents.architecture.build_architecture_chain",
+            "ai_council_review.llm.agents.specialist.build_specialist_chain",
             return_value=mock_chain,
         ):
             findings = run_architecture_agent(_make_state(), CouncilConfig())
@@ -166,7 +166,7 @@ class TestRunArchitectureAgent:
         mock_chain.invoke.side_effect = Exception("structured output parse failure")
 
         with patch(
-            "ai_council_review.llm.agents.architecture.build_architecture_chain",
+            "ai_council_review.llm.agents.specialist.build_specialist_chain",
             return_value=mock_chain,
         ):
             findings = run_architecture_agent(_make_state(), CouncilConfig())
@@ -180,7 +180,7 @@ class TestRunArchitectureAgent:
 
         with (
             patch(
-                "ai_council_review.llm.agents.architecture.build_architecture_chain",
+                "ai_council_review.llm.agents.specialist.build_specialist_chain",
                 return_value=mock_chain,
             ),
             pytest.raises(BudgetExceededError),

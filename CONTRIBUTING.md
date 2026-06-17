@@ -24,15 +24,19 @@ For a full list of environment variables and configuration options, see [AGENTS.
 ## Getting Started
 
 1. Fork the repository and clone your fork.
-2. Install dependencies:
+2. Check out the `develop` branch — this is the integration branch where all work lands:
+   ```bash
+   git checkout develop
+   ```
+3. Install dependencies:
    ```bash
    uv pip install -e ".[dev]"
    ```
-3. Run the test suite:
+4. Run the test suite:
    ```bash
    pytest
    ```
-4. Run lint and type check:
+5. Run lint and type check:
    ```bash
    ruff check .
    mypy src/ai_council_review
@@ -40,10 +44,13 @@ For a full list of environment variables and configuration options, see [AGENTS.
 
 ## Branching and Commits
 
-- Create a feature branch from `main`:
+This project uses a **Gitflow-lite** model: `develop` is the integration branch, `main` is release-only.
+
+- Create a feature branch from `develop`:
   ```bash
-  git checkout -b feature/my-feature main
+  git checkout -b feature/my-feature develop
   ```
+- Open your pull request targeting **`develop`**, not `main`.
 - Use [Conventional Commits](https://www.conventionalcommits.org/):
   - `feat:` — New feature
   - `fix:` — Bug fix
@@ -56,9 +63,12 @@ For a full list of environment variables and configuration options, see [AGENTS.
 ## Pull Request Process
 
 1. Ensure all tests pass, lint is clean, and type check is green.
-2. Update documentation if your change affects user-facing behavior.
-3. Fill out the PR template (if applicable).
-4. Request review from maintainers.
+2. Open the PR against **`develop`** (not `main`). CI runs on `develop` PRs.
+3. Update documentation if your change affects user-facing behavior.
+4. Fill out the PR template (if applicable).
+5. Request review from maintainers.
+
+> **Note on `main`:** `main` is the release branch and is only updated when a new version is cut. Direct pushes to `main` are not accepted. Releases are tagged from `main` and handled by the maintainers.
 
 ## Code Style
 

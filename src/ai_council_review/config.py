@@ -10,7 +10,35 @@ import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
+def _get_canonical_agents() -> list[str]:
+    """Return the canonical agent list derived from the specialist registry.
+
+    Includes the non-specialist fixed nodes (router, synthesis) plus every
+    specialist defined in ``SPECIALIST_AGENTS``.  Called lazily to avoid an
+    import cycle at module load time (config → llm.agents.registry → config).
+    """
+    from ai_council_review.llm.agents.registry import SPECIALIST_AGENTS  # noqa: PLC0415
+
+    specialist_names = [spec.name for spec in SPECIALIST_AGENTS]
+    return ["router", *specialist_names, "synthesis"]
+
+
+# Populated at first access via the public accessor; kept as a module-level
+# list so existing call sites (``from ai_council_review.config import CANONICAL_AGENTS``)
+# continue to work.  Do NOT call _get_canonical_agents() here — it would create
+# a circular import because config.py is loaded before the llm sub-package.
 CANONICAL_AGENTS: list[str] = ["router", "security", "quality", "architecture", "synthesis"]
+
+
+def get_canonical_agents() -> list[str]:
+    """Return the up-to-date canonical agent list from the registry.
+
+    Preferred over the module-level ``CANONICAL_AGENTS`` constant when called
+    after all packages are initialized (e.g., in ``validate_skill_budgets``).
+    """
+    return _get_canonical_agents()
+
 
 # Sentinel string that resolves to "all discovered skills" at runtime.
 ALL_SKILLS = "*"
@@ -328,7 +356,7 @@ def validate_skill_budgets(
 
     log = structlog.get_logger(__name__)
 
-    for agent_name in CANONICAL_AGENTS:
+    for agent_name in get_canonical_agents():
         # resolve_skills_for_agent enforces both soft (warn) and hard (raise).
         skills = resolve_skills_for_agent(agent_name, config, registry)
         # Emit a per-agent INFO summary at startup so operators can confirm
@@ -355,7 +383,10 @@ def validate_config(config: CouncilConfig) -> None:
     if not enabled_agents:
         # Default agents are implicitly enabled; if the user explicitly
         # disabled everything, we still need a key for the default set.
-        enabled_agents = [(name, AgentConfig()) for name in CANONICAL_AGENTS]
+        # Use get_canonical_agents() (not the stale CANONICAL_AGENTS constant)
+        # so the three new agents (performance, documentation, devops) are
+        # included in API-key validation.
+        enabled_agents = [(name, AgentConfig()) for name in get_canonical_agents()]
 
     missing: list[str] = []
     for name, agent_cfg in enabled_agents:

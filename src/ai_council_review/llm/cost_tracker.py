@@ -22,6 +22,9 @@ _DEFAULT_PRICING: dict[str, tuple[float, float]] = {
     "accounts/fireworks/models/llama-v3p1-405b-instruct": (2.00, 2.00),
     "gpt-4o": (5.00, 15.00),
     "gpt-4o-mini": (0.15, 0.60),
+    # gpt-4.1 pricing per OpenAI public pricing (verify at https://openai.com/api/pricing/)
+    "gpt-4.1": (2.00, 8.00),
+    "gpt-4.1-mini": (0.40, 1.60),
     "claude-3-5-sonnet": (3.00, 12.00),
     "claude-sonnet-4-20250514": (3.00, 15.00),
     "claude-3-5-haiku": (0.80, 4.00),
@@ -146,6 +149,11 @@ class CostTracker:
             return _DEFAULT_PRICING["gpt-4o-mini"]
         if "gpt-4o" in model:
             return _DEFAULT_PRICING["gpt-4o"]
+        # gpt-4.1-mini check must precede gpt-4.1 to avoid substring false-match
+        if "gpt-4.1-mini" in model:
+            return _DEFAULT_PRICING["gpt-4.1-mini"]
+        if "gpt-4.1" in model:
+            return _DEFAULT_PRICING["gpt-4.1"]
         if "claude-sonnet-4" in model:
             return _DEFAULT_PRICING["claude-sonnet-4-20250514"]
         if "claude-3-5-sonnet" in model:

@@ -161,7 +161,7 @@ class TestRouterNode:
 
         mock_output = MagicMock()
         mock_output.agents_needed = ["security", "quality"]
-        mock_output.review_depth = "deep"
+        mock_output.review_depth = "standard"
 
         with patch("ai_council_review.llm.graph.run_router_agent") as mock_router:
             mock_router.return_value = mock_output
@@ -169,7 +169,7 @@ class TestRouterNode:
             result = router_node(state, config)
 
         assert result["agents_needed"] == ["security", "quality"]
-        assert result["review_depth"] == "deep"
+        assert result["review_depth"] == "standard"
         mock_router.assert_called_once_with(state, config, registry=None)
 
     def test_router_node_skipped(self) -> None:
@@ -412,3 +412,110 @@ class TestBuildGraph:
         graph = build_graph(config)
 
         assert graph is not None
+
+    def test_synthesis_node_named_synthesis_not_synthesis_agent(self) -> None:
+        """Graph node for synthesis is registered as 'synthesis', matching CANONICAL_AGENTS.
+
+        H-4: The old name 'synthesis_agent' was inconsistent with CANONICAL_AGENTS
+        in config.py and _SYNTHESIS_AGENT in resolution.py (both use 'synthesis').
+        """
+        from ai_council_review.config import CANONICAL_AGENTS
+
+        config = CouncilConfig()
+        graph = build_graph(config)
+
+        # The compiled graph exposes its nodes via graph.nodes
+        node_names = set(graph.nodes.keys())
+        assert "synthesis" in node_names, f"Expected node named 'synthesis' but found: {node_names}"
+        assert "synthesis_agent" not in node_names, (
+            "Old node name 'synthesis_agent' must not exist — use 'synthesis' to match CANONICAL_AGENTS"
+        )
+        assert "synthesis" in CANONICAL_AGENTS
+
+
+class TestM4CapGuardrail:
+    """H-3: Boundary tests for the M4 specialist-count cap in router_node.
+
+    With 6 specialists registered and all enabled_by_default, the router fallback
+    returns all 6.  The M4 guardrail must:
+    - Cap to 4 for 'standard' depth.
+    - Leave counts unchanged when already <= 4 for 'standard' depth.
+    - Apply no cap for 'deep' depth (regardless of count).
+    """
+
+    def _run_router_node_with(
+        self,
+        agents: list[str],
+        depth: str,
+    ) -> dict:
+        """Drive router_node with a mocked run_router_agent returning the given args."""
+        config = CouncilConfig()
+        state = ReviewState(
+            pr_metadata=PRMetadata(
+                number=1,
+                title="Test",
+                state="open",
+                author="alice",
+                author_association="CONTRIBUTOR",
+                base_ref="main",
+                base_sha="base",
+                head_ref="feat",
+                head_sha="head",
+            ),
+            changed_files=[FileInfo(filename="src/main.py", status="modified")],
+        )
+
+        mock_output = MagicMock()
+        mock_output.agents_needed = agents
+        mock_output.review_depth = depth
+
+        with patch("ai_council_review.llm.graph.run_router_agent", return_value=mock_output):
+            return router_node(state, config)
+
+    def test_standard_depth_six_agents_capped_to_four(self) -> None:
+        """M4: 6 agents + standard depth → capped to exactly 4."""
+        six_agents = [
+            "security",
+            "quality",
+            "architecture",
+            "performance",
+            "documentation",
+            "devops",
+        ]
+        result = self._run_router_node_with(six_agents, "standard")
+        assert len(result["agents_needed"]) == 4
+        # The first four in list order survive.
+        assert result["agents_needed"] == six_agents[:4]
+
+    def test_standard_depth_four_agents_unchanged(self) -> None:
+        """M4: exactly 4 agents + standard depth → unchanged (no cap fires)."""
+        four_agents = ["security", "quality", "architecture", "performance"]
+        result = self._run_router_node_with(four_agents, "standard")
+        assert result["agents_needed"] == four_agents
+
+    def test_standard_depth_five_agents_capped_to_four(self) -> None:
+        """M4: 5 agents + standard depth → capped to 4."""
+        five_agents = ["security", "quality", "architecture", "performance", "documentation"]
+        result = self._run_router_node_with(five_agents, "standard")
+        assert len(result["agents_needed"]) == 4
+        assert result["agents_needed"] == five_agents[:4]
+
+    def test_deep_depth_six_agents_uncapped(self) -> None:
+        """M4: 6 agents + deep depth → all 6 agents returned (uncapped)."""
+        six_agents = [
+            "security",
+            "quality",
+            "architecture",
+            "performance",
+            "documentation",
+            "devops",
+        ]
+        result = self._run_router_node_with(six_agents, "deep")
+        assert len(result["agents_needed"]) == 6
+        assert result["agents_needed"] == six_agents
+
+    def test_deep_depth_four_agents_uncapped(self) -> None:
+        """M4: 4 agents + deep depth → all 4 returned (cap never applies for deep)."""
+        four_agents = ["security", "quality", "architecture", "performance"]
+        result = self._run_router_node_with(four_agents, "deep")
+        assert result["agents_needed"] == four_agents

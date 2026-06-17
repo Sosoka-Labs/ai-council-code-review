@@ -241,6 +241,70 @@ class TestValidateConfig:
         config_with_key = CouncilConfig()
         validate_config(config_with_key)  # should not raise
 
+    def test_validate_config_includes_all_six_specialists_when_zero_config(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """C-2: validate_config checks ALL registry agents (including the three new
+        ones: performance, documentation, devops) when no agents are configured.
+
+        A zero-config user with only OPENAI_API_KEY set should fail validation
+        because all six specialists default to the 'fireworks' provider.
+        """
+        from ai_council_review.config import get_canonical_agents
+        from ai_council_review.exceptions import ConfigError
+
+        # Clear all provider keys.
+        for var in ("FIREWORKS_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
+            monkeypatch.delenv(var, raising=False)
+        for var in (
+            "AI_COUNCIL__FIREWORKS_API_KEY",
+            "AI_COUNCIL__OPENAI_API_KEY",
+            "AI_COUNCIL__ANTHROPIC_API_KEY",
+        ):
+            monkeypatch.delenv(var, raising=False)
+
+        config = CouncilConfig()
+        with pytest.raises(ConfigError) as exc_info:
+            validate_config(config)
+
+        error_message = str(exc_info.value)
+        canonical = get_canonical_agents()
+
+        # All six specialists plus router/synthesis must appear in the error.
+        for agent_name in canonical:
+            assert agent_name in error_message, (
+                f"Expected agent '{agent_name}' in error message but it was missing.\n"
+                f"This means get_canonical_agents() is not being used in validate_config. "
+                f"Error: {error_message[:200]}"
+            )
+
+        # Specifically, the three new agents must be validated.
+        for new_agent in ("performance", "documentation", "devops"):
+            assert new_agent in error_message, (
+                f"New agent '{new_agent}' not validated — stale CANONICAL_AGENTS still in use."
+            )
+
+    def test_validate_config_openai_only_key_fails_for_fireworks_default_agents(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """C-2 integration: a single OPENAI_API_KEY does NOT satisfy zero-config validation.
+
+        All default agents use model='fireworks', so only FIREWORKS_API_KEY
+        should make zero-config validation pass.
+        """
+        from ai_council_review.exceptions import ConfigError
+
+        # Set only the OpenAI key.
+        for var in ("FIREWORKS_API_KEY", "ANTHROPIC_API_KEY"):
+            monkeypatch.delenv(var, raising=False)
+        for var in ("AI_COUNCIL__FIREWORKS_API_KEY", "AI_COUNCIL__ANTHROPIC_API_KEY"):
+            monkeypatch.delenv(var, raising=False)
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-test-key")
+
+        config = CouncilConfig()  # no explicit agents — uses all defaults
+        with pytest.raises(ConfigError):
+            validate_config(config)
+
 
 class TestSkillSelector:
     """Tests for SkillSelector-related config fields and helpers."""

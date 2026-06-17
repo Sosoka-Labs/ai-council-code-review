@@ -1,6 +1,10 @@
 name: AI Council Review
 
 on:
+  # SECURITY NOTE: Do NOT change this to `pull_request_target`. The _target
+  # variant runs with the base branch's secrets in the context of fork code,
+  # which would expose all repository secrets to untrusted PRs. AI Council
+  # handles fork detection internally (see config: comment_on_forks).
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     branches: [main]
@@ -22,7 +26,7 @@ jobs:
 
     steps:
       - name: Checkout PR HEAD
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
@@ -31,14 +35,16 @@ jobs:
         run: git fetch origin ${{ github.event.pull_request.base.ref }} --depth=100
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: '3.11'
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
         with:
           version: '0.6.0'
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
 
       - name: Install dependencies
         run: uv pip install --system -e ".[dev]"
@@ -52,6 +58,9 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           BASE_REF: ${{ github.event.pull_request.base.ref }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          # Set at least ONE of these three API key secrets in your repo
+          # Settings > Secrets and variables > Actions. Unset keys resolve to
+          # empty strings and are safely ignored by the application.
           FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
