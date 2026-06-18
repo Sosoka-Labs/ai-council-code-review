@@ -1,8 +1,8 @@
 # AI Council — self-dogfood configuration
 # Routes every agent to Fireworks.ai (the default provider) so the council can
 # review its own pull requests with the FIREWORKS_API_KEY repository secret.
-# Specialists use Llama 3.1 70B; the router and synthesis nodes use the cheaper
-# 8B model for fast classification/merging.
+# All agents use kimi-k2p6, the model this account's key is entitled to.
+# (review_depth: deep runs all six specialists; drop to "standard" to cap at four.)
 
 version: "1"
 
@@ -32,26 +32,26 @@ total_timeout_seconds: 600
 debug: true
 
 agents:
-  # Cheap, fast classification/merge nodes.
+  # Classification and merge nodes.
   router:
     enabled: true
     model: fireworks
-    model_name: fireworks/llama-3.1-8b
+    model_name: accounts/fireworks/models/kimi-k2p6
     temperature: 0.1
     max_tokens: 2000
 
   synthesis:
     enabled: true
     model: fireworks
-    model_name: fireworks/llama-3.1-8b
+    model_name: accounts/fireworks/models/kimi-k2p6
     temperature: 0.2
     max_tokens: 16000
 
-  # Specialists — stronger model, each with its bound domain skill.
+  # Specialists — each with its bound domain skill.
   security:
     enabled: true
     model: fireworks
-    model_name: fireworks/llama-3.1-70b
+    model_name: accounts/fireworks/models/kimi-k2p6
     temperature: 0.2
     max_tokens: 16000
     skills: [oauth-pitfalls]
@@ -59,21 +59,21 @@ agents:
   quality:
     enabled: true
     model: fireworks
-    model_name: fireworks/llama-3.1-70b
+    model_name: accounts/fireworks/models/kimi-k2p6
     temperature: 0.3
     max_tokens: 16000
 
   architecture:
     enabled: true
     model: fireworks
-    model_name: fireworks/llama-3.1-70b
+    model_name: accounts/fireworks/models/kimi-k2p6
     temperature: 0.3
     max_tokens: 16000
 
   performance:
     enabled: true
     model: fireworks
-    model_name: fireworks/llama-3.1-70b
+    model_name: accounts/fireworks/models/kimi-k2p6
     temperature: 0.3
     max_tokens: 16000
     skills: [n-plus-one]
@@ -81,7 +81,7 @@ agents:
   documentation:
     enabled: true
     model: fireworks
-    model_name: fireworks/llama-3.1-70b
+    model_name: accounts/fireworks/models/kimi-k2p6
     temperature: 0.3
     max_tokens: 16000
     skills: [docstring-style]
@@ -89,7 +89,7 @@ agents:
   devops:
     enabled: true
     model: fireworks
-    model_name: fireworks/llama-3.1-70b
+    model_name: accounts/fireworks/models/kimi-k2p6
     temperature: 0.3
     max_tokens: 16000
     skills: [github-actions-hardening]
