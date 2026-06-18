@@ -9,6 +9,8 @@
 
 Most AI reviewers see only the diff. AI Council dispatches six domain specialists — security, quality, architecture, performance, documentation, and devops — that browse your repository in real time, reading unchanged files to catch consistency, security, and architectural impact a single-pass reviewer misses. A router gates which specialists run on each PR to keep cost low, and a synthesis agent dedupes their findings into one coherent review posted as inline comments.
 
+Every specialist can also be bound to **Skills you define in your own repository** — versioned markdown that encodes your conventions, guidelines, and known pitfalls — so each agent reviews your code with the context your team actually relies on.
+
 ---
 
 ## Why AI Council vs. a single-agent reviewer
@@ -17,7 +19,7 @@ Most AI reviewers see only the diff. AI Council dispatches six domain specialist
 - **It reads beyond the diff.** When a GitHub token is present, agents browse unchanged files on demand — so the documentation agent can check whether your `README.md` still matches the signature you just changed, and the architecture agent can trace cross-file impact.
 - **Routed for cost.** A fast, cheap router decides which specialists a PR actually needs, so a typical change runs a couple of agents — not all six — under a configurable per-PR budget.
 - **One review, not a wall of noise.** The synthesis agent deduplicates overlapping findings, resolves conflicts, and emits a single verdict: `approve`, `comment`, or `request_changes`.
-- **Pluggable domain knowledge.** Bind project-specific [Skills](docs/skills.md) — markdown files versioned in your repo — to any agent to teach it your conventions and known pitfalls.
+- **Teach it your codebase.** Bind [Skills](docs/skills.md) — versioned markdown files you define in your own repository — to any agent, giving it project-specific context, conventions, and guidelines whenever it reviews your code.
 
 ---
 
