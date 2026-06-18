@@ -1,0 +1,39 @@
+version: 2
+
+updates:
+  # Python dependencies (pyproject.toml / uv lockfile)
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      # Bundle LangChain ecosystem bumps together to reduce PR noise
+      langchain:
+        patterns:
+          - "langchain*"
+          - "langgraph*"
+      # Minor and patch updates for everything else batched together
+      minor-patch:
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # Major version bumps require intentional upgrade work
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # GitHub Actions (all .github/workflows/*.yml files)
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      # Batch minor/patch action updates to keep the PR queue quiet
+      actions-minor-patch:
+        update-types:
+          - minor
+          - patch

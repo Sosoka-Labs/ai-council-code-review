@@ -25,11 +25,18 @@ from ai_council_review.skills.resolution import (
 logger = structlog.get_logger()
 
 
-def _build_agent_variables(state: ReviewState) -> dict[str, Any]:
+_PR_TITLE_MAX_CHARS = 500
+
+
+def _build_agent_variables(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
     """Build prompt variables from review state.
+
+    Applies safety limits on untrusted PR content (title, diff) before
+    injecting into LLM prompts.
 
     Args:
         state: Current review state.
+        config: Council configuration (used for max_diff_size).
 
     Returns:
         Dict of prompt template variables.
@@ -45,8 +52,12 @@ def _build_agent_variables(state: ReviewState) -> dict[str, Any]:
             diff_parts.append(f"=== {f.filename} ===\n{f.patch}")
     diff_text = "\n\n".join(diff_parts)
 
+    max_chars = config.max_diff_size
+    if len(diff_text) > max_chars:
+        diff_text = diff_text[:max_chars] + f"\n\n[... diff truncated at {max_chars} chars ...]"
+
     pr = state.pr_metadata
-    pr_title = pr.title if pr else ""
+    pr_title = (pr.title or "")[:_PR_TITLE_MAX_CHARS] if pr else ""
     pr_number = pr.number if pr else 0
     repo = pr.html_url if pr else ""
 
@@ -112,7 +123,7 @@ def run_generalist_agent(
     chain = build_generalist_executor(config, browser, registry=registry)
 
     try:
-        variables = _build_agent_variables(state)
+        variables = _build_agent_variables(state, config)
         run_config: RunnableConfig | None = {"callbacks": callbacks} if callbacks else None
         result = chain.invoke(variables, config=run_config)
         output: str = result.content if hasattr(result, "content") else str(result)

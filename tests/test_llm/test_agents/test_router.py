@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from ai_council_review.config import CouncilConfig
 from ai_council_review.exceptions import BudgetExceededError
 from ai_council_review.llm.agents.router import RouterOutput, build_router_chain, run_router_agent
@@ -111,7 +113,7 @@ class TestRunRouterAgent:
         """Mock chain.invoke returns RouterOutput; verify return type and fields."""
         expected = RouterOutput(
             agents_needed=["security", "quality"],
-            review_depth="deep",
+            review_depth="standard",
             reasoning="Looks security-sensitive",
         )
         mock_chain = MagicMock()
@@ -125,7 +127,7 @@ class TestRunRouterAgent:
 
         assert isinstance(result, RouterOutput)
         assert result.agents_needed == ["security", "quality"]
-        assert result.review_depth == "deep"
+        assert result.review_depth == "standard"
         assert result.reasoning == "Looks security-sensitive"
 
     def test_run_router_agent_falls_back_on_exception(self) -> None:
@@ -139,19 +141,20 @@ class TestRunRouterAgent:
         ):
             result = run_router_agent(_make_state(), CouncilConfig())
 
+        from ai_council_review.llm.agents.registry import SPECIALIST_AGENTS
+
         assert isinstance(result, RouterOutput)
-        assert set(result.agents_needed) == {"security", "quality", "architecture"}
+        # Fallback returns all enabled specialists from the registry.
+        expected = {spec.name for spec in SPECIALIST_AGENTS if spec.enabled_by_default}
+        assert set(result.agents_needed) == expected
         assert result.review_depth == "standard"
         assert "Router failed" in result.reasoning
 
-    def test_run_router_agent_propagates_budget_error(self) -> None:
-        """Router catches all exceptions including BudgetExceededError and returns fallback.
-
-        Unlike the specialist agents, the router does not re-raise BudgetExceededError —
-        it degrades gracefully so the pipeline can still run all agents.
-        """
+    def test_run_router_agent_falls_back_when_chain_returns_none(self) -> None:
+        """When chain.invoke returns None (reasoning-model behaviour), a safe
+        fallback RouterOutput is returned instead of raising AttributeError."""
         mock_chain = MagicMock()
-        mock_chain.invoke.side_effect = BudgetExceededError("over budget")
+        mock_chain.invoke.return_value = None
 
         with patch(
             "ai_council_review.llm.agents.router.build_router_chain",
@@ -159,5 +162,29 @@ class TestRunRouterAgent:
         ):
             result = run_router_agent(_make_state(), CouncilConfig())
 
+        from ai_council_review.llm.agents.registry import SPECIALIST_AGENTS
+
         assert isinstance(result, RouterOutput)
-        assert set(result.agents_needed) == {"security", "quality", "architecture"}
+        expected = {spec.name for spec in SPECIALIST_AGENTS if spec.enabled_by_default}
+        assert set(result.agents_needed) == expected
+        assert result.review_depth == "standard"
+        assert "None" in result.reasoning
+
+    def test_run_router_agent_propagates_budget_error(self) -> None:
+        """BudgetExceededError raised during routing is re-raised immediately.
+
+        The router no longer degrades gracefully on budget errors — it re-raises
+        to prevent launching three more expensive specialist agents when the
+        budget is already exhausted.
+        """
+        mock_chain = MagicMock()
+        mock_chain.invoke.side_effect = BudgetExceededError("over budget")
+
+        with (
+            patch(
+                "ai_council_review.llm.agents.router.build_router_chain",
+                return_value=mock_chain,
+            ),
+            pytest.raises(BudgetExceededError),
+        ):
+            run_router_agent(_make_state(), CouncilConfig())

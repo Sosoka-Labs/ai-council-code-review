@@ -1,0 +1,33 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+# Write permission is required to create the GitHub Release object and upload
+# release assets. All other scopes remain at the default (read-only).
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+        with:
+          fetch-depth: 0
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2.6.2
+        with:
+          # Auto-generate release notes from merged PRs and commit messages.
+          # To use hand-crafted CHANGELOG notes instead, set body_path to a
+          # file extracted from CHANGELOG.md and set generate_release_notes: false.
+          generate_release_notes: true
+          # Mark as pre-release if the tag contains a pre-release identifier
+          prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') }}

@@ -3,36 +3,69 @@
 [![CI](https://github.com/Sosoka-Labs/ai-council-code-review/actions/workflows/ci.yml/badge.svg)](https://github.com/Sosoka-Labs/ai-council-code-review/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-1.0.0-green.svg)](https://github.com/Sosoka-Labs/ai-council-code-review/releases)
+[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/Sosoka-Labs/ai-council-code-review/releases)
 
-A configurable, multi-agent AI code review system for GitHub Actions. Unlike single-agent tools that review diffs in isolation, AI Council dispatches a council of specialized agents that can browse your repository in real time to check unchanged files for consistency, security, and architectural impact.
+**A council of specialist AI agents that reviews your pull requests — and reads the rest of your repo to catch what a diff alone can't.**
+
+Most AI reviewers see only the diff. AI Council dispatches six domain specialists — security, quality, architecture, performance, documentation, and devops — that browse your repository in real time, reading unchanged files to catch consistency, security, and architectural impact a single-pass reviewer misses. A router gates which specialists run on each PR to keep cost low, and a synthesis agent dedupes their findings into one coherent review posted as inline comments.
+
+Every specialist can also be bound to **Skills you define in your own repository** — versioned markdown that encodes your conventions, guidelines, and known pitfalls — so each agent reviews your code with the context your team actually relies on.
 
 ---
 
-## Overview
+## Why AI Council vs. a single-agent reviewer
 
-AI Council reviews every pull request with a team of specialist agents:
+- **Six focused specialists, not one generalist.** Each agent reasons about one domain at the right temperature and depth — instead of a single prompt trying to be a security, performance, and docs expert at once.
+- **It reads beyond the diff.** When a GitHub token is present, agents browse unchanged files on demand — so the documentation agent can check whether your `README.md` still matches the signature you just changed, and the architecture agent can trace cross-file impact.
+- **Routed for cost.** A fast, cheap router decides which specialists a PR actually needs, so a typical change runs a couple of agents — not all six — under a configurable per-PR budget.
+- **One review, not a wall of noise.** The synthesis agent deduplicates overlapping findings, resolves conflicts, and emits a single verdict: `approve`, `comment`, or `request_changes`.
+- **Teach it your codebase.** Bind [Skills](docs/skills.md) — versioned markdown files you define in your own repository — to any agent, giving it project-specific context, conventions, and guidelines whenever it reviews your code.
 
-| Capability | What it means for you |
-|-----------|----------------------|
-| **Multi-agent council** | Router, Security, Quality, Architecture, and Synthesis agents each focus on their domain |
-| **Cross-file awareness** | Agents read `README.md`, tests, migrations, and dependencies to catch drift and impact |
-| **Agent-attributed comments** | Every inline comment is tagged with the agent name and confidence score |
-| **Cost-controlled** | Configurable per-PR budget ($5.00 default); skip on forks by default |
-| **Graceful degradation** | One agent failure does not crash the workflow; others continue |
-| **Multi-provider** | Fireworks.ai (default), OpenAI, and Anthropic — all agents support all three providers |
-| **Stateless** | No persistence, no vector store, no database — just the GitHub API and smart prompts |
+---
 
-**Why this matters:**
-- A single-agent reviewer sees only the diff. AI Council's Architecture agent can check whether your `README.md` still matches the API you just changed.
-- The Security agent scans for secrets and unsafe patterns, while the Quality agent checks for missing tests and edge cases.
-- The Synthesis agent deduplicates and prioritizes findings so you get one coherent review, not a wall of noise.
+## How it works
+
+```mermaid
+flowchart LR
+    PR[Pull Request] --> Ingest[Ingest<br/>diffs + skip rules]
+    Ingest --> Router{Router<br/>which specialists?}
+    Router --> Sec[Security]
+    Router --> Qual[Quality]
+    Router --> Arch[Architecture]
+    Router --> Perf[Performance]
+    Router --> Doc[Documentation]
+    Router --> Ops[DevOps]
+    Sec --> Syn[Synthesis<br/>dedupe + verdict]
+    Qual --> Syn
+    Arch --> Syn
+    Perf --> Syn
+    Doc --> Syn
+    Ops --> Syn
+    Syn --> Comments[Inline PR Comments]
+```
+
+The router selects only the specialists a PR needs; the selected ones run **in parallel**, then converge on synthesis. One agent failing does not crash the run — the others continue. See [docs/architecture.md](docs/architecture.md) for the full state machine.
+
+---
+
+## Agents at a glance
+
+| Agent | Focus | Triggers when the diff touches… |
+|-------|-------|---------------------------------|
+| **Security** | Auth bypasses, injection, secrets, unsafe deserialization, missing validation | auth, crypto, user input, secrets, deps, API endpoints, data persistence |
+| **Quality** | Logic bugs, error handling, type safety, missing tests, complexity | significant code changes, error handling, tests, typing |
+| **Architecture** | Cross-file impact, public-API consistency, docs/migration drift | multiple files/modules, public APIs, data models, configuration |
+| **Performance** | N+1 queries, unbounded result sets, O(n²) loops, sync I/O on hot paths | DB/ORM queries, loops over collections, request handlers, `repositories/`, `dao/` |
+| **Documentation** | Stale docstrings vs. changed signatures, missing docs, changelog gaps | `*.md`, public signature changes, new CLI flags/env vars, new exports |
+| **DevOps** | GitHub Actions, Dockerfiles, Terraform, shell scripts, CI/CD hardening | `.github/workflows/*`, `Dockerfile`, `*.tf`, `*.sh`, CI YAML |
+
+A **router** gates which specialists run per PR and picks the review depth; a **synthesis** agent dedupes findings and emits the verdict. Full mandates, router logic, and cross-file behavior → see [docs/agents.md](docs/agents.md).
 
 ---
 
 ## Quick Start
 
-Add AI Council to any repository in three steps:
+Add AI Council to any repository in three steps.
 
 ### 1. Add the workflow
 
@@ -82,8 +115,7 @@ jobs:
           version: '0.6.0'
 
       - name: Install dependencies
-        run: |
-          uv pip install --system -e .
+        run: uv pip install --system -e .
 
       - name: Run AI Council Review
         env:
@@ -94,9 +126,9 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           BASE_REF: ${{ github.event.pull_request.base.ref }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
-          FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
         run: |
           python -m ai_council_review \
             --pr-number "$PR_NUMBER" \
@@ -109,429 +141,109 @@ jobs:
 
 ### 2. Add your API key
 
-In your repository settings, go to **Settings > Secrets and variables > Actions** and add at least one of:
-
-- `FIREWORKS_API_KEY` — recommended default
-- `OPENAI_API_KEY` — alternative
-- `ANTHROPIC_API_KEY` — alternative
-
-> **Note:** The workflow above passes these secrets as bare environment variables (e.g., `FIREWORKS_API_KEY`), which LangChain reads automatically. If you prefer to set them via the config system, use the `AI_COUNCIL__FIREWORKS_API_KEY` style instead.
+In **Settings › Secrets and variables › Actions**, add `OPENAI_API_KEY` — that is all the default configuration needs. `ANTHROPIC_API_KEY` and `FIREWORKS_API_KEY` are optional alternatives; the workflow passes whichever are present, and LangChain reads them automatically.
 
 ### 3. (Optional) Customize behavior
 
-Add `.ai-council/config.yaml` to your repository root to customize agents, models, and rules. See [Configuration](#configuration) and the [example config](examples/.ai-council/config.yaml).
+Drop `.ai-council/config.yaml` into your repo root to tune agents, models, and rules. Everything has a default — the tool works with zero config. See the [example config](examples/.ai-council/config.yaml) and [docs/configuration.md](docs/configuration.md).
 
-That's it. Open a pull request and AI Council will post a review.
+Open a pull request and AI Council will post a review.
 
 ---
 
 ## Configuration
 
-AI Council looks for `.ai-council/config.yaml` in the repository root (on the base branch). If the file is missing, sensible defaults are used.
+`.ai-council/config.yaml` (optional) tunes review settings, per-agent models and providers, prompt overrides, and skip rules. Override any value with `AI_COUNCIL__*` environment variables. Every option has a sensible default.
 
-### Complete example
+→ See [docs/configuration.md](docs/configuration.md)
 
-```yaml
-version: "1"
+## Skills
 
-# ── Review Settings ───────────────────────────────────
-review_depth: standard          # "standard" or "deep"
-max_files: 50                   # Skip PRs with more than this many files
-max_lines: 2000                 # Skip PRs with more than this many changed lines
-max_diff_size: 50000            # Skip PRs with diff larger than this (bytes)
-comment_on_forks: false         # Skip commenting on fork PRs by default
-skip_drafts: true               # Skip draft PRs
-skip_labels:                    # Skip PRs with any of these labels
-  - "skip-ai-review"
-  - "wip"
-skip_patterns:                  # Skip files matching these patterns
-  - "package-lock.json"           # Exact filename match
-  - "yarn.lock"
-  - "poetry.lock"
-  - "Cargo.lock"
-  - "Gemfile.lock"
-  - "*.snap"                      # Glob wildcard: all .snap files
-  - "dist/"                       # Directory prefix: anything under dist/
-  - "build/"
-  - "node_modules/"
-  - "**/*.pyc"                    # Glob: all .pyc files in any directory
+Skills are versioned `SKILL.md` files **you add to your own repository** under `.ai-council/skills/` to inject project-specific knowledge — conventions, known pitfalls, domain rules — into a specialist's prompt. They are **opt-in**: no agent has a skill bound by default. You attach them in your config per agent, with a `"*"` sentinel, or as a repo-wide default. This repo ships four example skills (for the security, performance, documentation, and devops agents) you can copy as a starting point.
 
-# ── Cost & Timeout Control ──────────────────────────
-budget_usd: 5.00                # Max estimated cost per PR
-agent_timeout_seconds: 300      # Per-agent timeout (5 minutes)
-total_timeout_seconds: 600      # Overall workflow timeout (10 minutes)
-debug: false                    # Dump debug artifact when true
-rate_limit_threshold: 50        # Enter conservative mode below this threshold
+→ See [docs/skills.md](docs/skills.md)
 
-# ── Agent Configuration ───────────────────────────────
-# `model` is the provider name: fireworks, openai, or anthropic
-# `model_name` is the full model identifier the provider expects
-agents:
-  router:
-    enabled: true
-    model: fireworks
-    model_name: accounts/fireworks/models/llama-v3p1-70b-instruct
-    temperature: 0.1
-    max_tokens: 2000
+## Cost control
 
-  security:
-    enabled: true
-    model: fireworks
-    model_name: accounts/fireworks/models/llama-v3p1-70b-instruct
-    temperature: 0.2
-    max_tokens: 4000
+A default **$5.00 per-PR budget** is enforced via router gating and token estimation; hard `max_files` / `max_lines` / `max_diff_size` limits skip oversized PRs. A debug mode dumps the full review state (secrets stripped) for auditing spend.
 
-  quality:
-    enabled: true
-    model: fireworks
-    model_name: accounts/fireworks/models/llama-v3p1-70b-instruct
-    temperature: 0.3
-    max_tokens: 4000
+→ See [docs/cost-control.md](docs/cost-control.md)
 
-  architecture:
-    enabled: true
-    model: fireworks
-    model_name: accounts/fireworks/models/llama-v3p1-70b-instruct
-    temperature: 0.3
-    max_tokens: 4000
+## Security
 
-  synthesis:
-    enabled: true
-    model: fireworks
-    model_name: accounts/fireworks/models/llama-v3p1-70b-instruct
-    temperature: 0.2
-    max_tokens: 4000
+API keys live in GitHub Secrets and are never logged. Fork PRs are skipped by default because their token is read-only, and AI Council deliberately does **not** use `pull_request_target`. Drafts, labeled PRs, and oversized diffs are filtered automatically.
 
-# ── LLM Provider Settings ─────────────────────────────
-# API keys are loaded from environment variables by default.
-# Hardcoding them here is not recommended for public repos.
+→ See [docs/security.md](docs/security.md)
 
-providers:
-  fireworks:
-    api_key: null
-  openai:
-    api_key: null
-  anthropic:
-    api_key: null
-```
+## Providers
 
-### Environment variable overrides
+OpenAI is the default provider (`gpt-4.1` for specialists, `gpt-4.1-mini` for router and synthesis). Anthropic and Fireworks are first-class alternatives, mixable per agent. Shorthand model aliases keep config readable.
 
-API keys can be set via environment variables:
-
-```bash
-AI_COUNCIL__FIREWORKS_API_KEY=fw-xxxxxxxx
-AI_COUNCIL__OPENAI_API_KEY=sk-xxxxxxxx
-AI_COUNCIL__ANTHROPIC_API_KEY=sk-ant-xxxxxxxx
-AI_COUNCIL__GITHUB_TOKEN=ghp_xxxxxxxx
-```
-
-### Model aliases
-
-You can use shorthand names instead of full provider paths. Both the alias form and the full model ID are accepted — for example, `fireworks/llama-3.1-70b` and `accounts/fireworks/models/llama-v3p1-70b-instruct` are equivalent.
-
-| Alias | Resolves to |
-|-------|-------------|
-| `fireworks/llama-3.1-70b` | `accounts/fireworks/models/llama-v3p1-70b-instruct` |
-| `fireworks/llama-3.1-8b` | `accounts/fireworks/models/llama-v3p1-8b-instruct` |
-| `fireworks/kimi-k2p6` | `accounts/fireworks/routers/kimi-k2p6-turbo` |
-| `openai/gpt-4o` | `gpt-4o` |
-| `openai/gpt-4.1` | `gpt-4.1` |
-| `openai/gpt-4.1-mini` | `gpt-4.1-mini` |
-| `anthropic/claude-sonnet` | `claude-sonnet-4-20250514` |
-| `anthropic/claude-haiku` | `claude-3-haiku-20240307` |
-
-### Mixed-provider example
-
-You can mix providers and models per agent to optimize cost and quality:
-
-```yaml
-agents:
-  router:
-    model: openai
-    model_name: openai/gpt-4.1-mini   # fast, cheap
-    temperature: 0.1
-    max_tokens: 2000
-
-  security:
-    model: fireworks
-    model_name: fireworks/llama-3.1-70b
-    temperature: 0.2
-    max_tokens: 16000
-
-  synthesis:
-    model: anthropic
-    model_name: anthropic/claude-sonnet  # strong reasoning
-    temperature: 0.2
-    max_tokens: 16000
-```
-
-> **Tip:** Model choice directly affects cost. Using a cheaper model for Router and a stronger one for Synthesis is the recommended balance.
-
-### Override prompts
-
-You can override any agent's system prompt by adding a `system_prompt` field to that agent's config:
-
-```yaml
-agents:
-  security:
-    system_prompt: |
-      You are a security-focused code reviewer. Focus on OWASP Top 10,
-      secret leakage, and injection risks. Be concise.
-```
-
----
-
-## Skills — Binding domain knowledge to agents
-
-Skills are markdown files that inject project-specific knowledge into a specialist agent's system prompt. They let downstream teams encode conventions, known pitfalls, or domain rules that the generic agents would otherwise have no visibility into. Skills travel with the reviewed repository, are versioned in git, and can be PR-reviewed like any other config.
-
-### File layout
-
-Place skill files under `.ai-council/skills/<name>/SKILL.md`:
-
-```
-.ai-council/
-└── skills/
-    └── oauth-pitfalls/
-        └── SKILL.md         # required: YAML frontmatter + markdown body
-```
-
-Minimal `SKILL.md`:
-
-```markdown
----
-name: oauth-pitfalls
-description: Use when reviewing OAuth 2.0 flows, token handling, or PKCE implementations.
----
-# OAuth Pitfalls
-
-...review guidance here...
-```
-
-### Frontmatter fields
-
-| Field | Required | Notes |
-|-------|----------|-------|
-| `name` | Yes | Lowercase and hyphens only; must match the parent directory name |
-| `description` | Yes | 1024 chars max; the Router reads descriptions to route more accurately |
-| Any other fields | No | Preserved as-is; ignored by AI Council in Phase 1 |
-
-### Binding to agents
-
-Skills are bound explicitly per agent in `.ai-council/config.yaml`. Three patterns are supported:
-
-```yaml
-# Pattern 1 — explicit per-agent list (recommended)
-agents:
-  security:
-    skills: [oauth-pitfalls, jwt-validation]
-
-# Pattern 2 — star sentinel: give this agent every discovered skill
-agents:
-  architecture:
-    skills: "*"
-
-# Pattern 3 — top-level default applied to every agent that doesn't set its own
-default_agent_skills: [domain-glossary]
-# Set skills: [] on a specific agent to opt it out of the default.
-```
-
-Resolution order per agent: explicit `skills:` on the agent → `default_agent_skills` → none (no skills).
-
-Listing a skill name that does not exist on disk is a hard error at config load time. The `"*"` sentinel always resolves at runtime and is never a load-time error.
-
-### What each role receives
-
-- **Specialist agents** (security, quality, architecture, generalist) — full skill bodies appended to the system prompt.
-- **Router** — a descriptions-only catalog (name + description for each skill) appended to its system prompt, so it can route more accurately when domain skills are present. No bodies.
-- **Synthesis** — no skills in Phase 1.
-
-### Token budgets
-
-The sum of skill bodies for each agent is checked before the run:
-
-- Soft limit (default 8 000 tokens): warning logged, run continues.
-- Hard limit (default 16 000 tokens): `ConfigError` raised, run aborts with a list of offending skill sizes.
-
-Both limits are configurable:
-
-```yaml
-skills_token_budget_soft: 8000
-skills_token_budget_hard: 16000
-```
-
-The budget uses a `len / 4` character approximation — exact per-model tokenization is deferred to a later phase.
-
-### Future phases
-
-Progressive disclosure (on-demand body loading via a `load_skill` tool) and skill scripts (`scripts/` subdirectory) are tracked for Phase 2 and Phase 3 respectively.
-
----
-
-## Agents
-
-| Agent | Role | What it checks |
-|-------|------|----------------|
-| **Router** | Orchestrator | Reads the PR title, description, and changed files to decide which specialist agents are needed and how deep the review should go |
-| **Security** | Vulnerability hunter | Secrets leakage, auth bypasses, injection risks, unsafe deserialization, missing input validation |
-| **Quality** | Correctness reviewer | Logic errors, off-by-one bugs, missing error handling, type mismatches, missing tests, high complexity |
-| **Architecture** | System-level reviewer | Cross-file impact, API consistency, documentation freshness, dependency changes, migration alignment |
-| **Synthesis** | Editor-in-chief | Deduplicates findings across agents, resolves conflicts, prioritizes by severity, formats the final review and verdict |
-
-### How the Router decides
-
-The Router uses simple heuristics plus model reasoning:
-- Files in `auth/`, `security/`, `crypto/` → include Security
-- Source files with significant additions → include Quality
-- `README.md`, `docs/`, `api/` changes → include Architecture
-- Configurable overrides in `config.yaml` can force agents on or off
-
-### Cross-file awareness
-
-The Architecture agent is the primary user of the Repository Browser, but all agents can read files when needed:
-
-| Scenario | Files the agent may read |
-|----------|--------------------------|
-| New public API endpoint | `README.md`, `docs/API.md`, `openapi.yaml` |
-| New function without tests | `tests/`, `test_*` files in related directories |
-| Auth logic modified | Other files in `auth/`, `middleware/` directories |
-| Dependency added | `requirements.txt`, `package.json`, `poetry.lock` |
-| Model/DB schema changed | Migration files in `migrations/` |
-| Config key added | `.env.example`, `config.yaml`, `docker-compose.yml` |
-
----
-
-## Cost Control
-
-### Budget
-
-The default cost budget is **$5.00 per PR**. This is a soft limit based on estimated token usage:
-- The Router runs first on a fast, cheap model to decide which agents are needed
-- Before dispatching agents, the system estimates token usage
-- If the estimate approaches the budget, non-critical agents are skipped or switched to cheaper models
-
-### Typical costs
-
-| PR size | Agents dispatched | Estimated cost |
-|---------|-------------------|----------------|
-| Small (1-3 files) | Router + 2 specialists + Synthesis | ~$0.50 - $1.50 |
-| Medium (5-15 files) | Router + 3 specialists + Synthesis | ~$1.50 - $3.50 |
-| Large (20-50 files) | Router + 3 specialists + Synthesis | ~$3.50 - $5.00 |
-
-Costs vary by provider and model. Fireworks.ai is the default because it offers strong reasoning at a lower price point for the models used in this project.
-
-### Hard limits
-
-You can also enforce hard PR size limits to prevent runaway costs:
-- `max_files: 50` — skip PRs with more than 50 changed files
-- `max_lines: 2000` — skip PRs with more than 2000 added/deleted lines
-- `max_diff_size: 50000` — skip PRs with a diff larger than 50 KB
-
----
-
-## Debug Mode
-
-Enable debug mode to dump the full review state as a workflow artifact. This is useful for troubleshooting why an agent did or did not flag something, or for auditing token usage.
-
-```yaml
-debug: true
-```
-
-When enabled, the action uploads a JSON artifact containing:
-- The full `ReviewState` (PR metadata, agent outputs, synthesis)
-- `files_read` — every file each agent browsed
-- `api_calls` — GitHub API call count
-- Estimated token usage per agent
-
-**Secrets are automatically stripped** from the artifact before upload.
-
-Download the artifact from the GitHub Actions run page under **Artifacts**.
-
----
-
-## Troubleshooting
-
-| Error | Likely cause | Fix |
-|-------|-------------|-----|
-| `Configuration error: No LLM API key found` | Missing or misnamed secret | Add `FIREWORKS_API_KEY` (or `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) to **Settings > Secrets and variables > Actions**. See [Quick Start > Add your API key](#2-add-your-api-key). |
-| `LLM provider error: Unsupported provider: xyz` | Typo in `model` field | Use one of: `fireworks`, `openai`, `anthropic`. Check `.ai-council/config.yaml`. |
-| `LLM provider error: Failed to initialize...` | Invalid API key or model name | Verify the secret value and the `model_name` in config. Try an alias from the [Model aliases](#model-aliases) table. |
-| `Review failed with timeout` | PR too large or model too slow | Reduce `max_files` / `max_lines` in config, or increase `agent_timeout_seconds` / `total_timeout_seconds`. |
-| `No review posted on fork PR` | Expected default behavior | Fork PRs are skipped by default (`comment_on_forks: false`). See [Security > Fork behavior](#fork-behavior). |
-| `Agent output is empty or garbled` | Model context too short for JSON | Increase `max_tokens` for the affected agent (e.g., 16000 for Fireworks reasoning models). |
+→ See [docs/providers.md](docs/providers.md)
 
 ---
 
 ## Known Limitations
 
-- **v1 is stateless** — AI Council does not learn from past reviews or remember project conventions between runs.
-- **No IDE or CLI tool** — The only supported interface is the GitHub Actions workflow.
-- **No custom provider support** — Only Fireworks.ai, OpenAI, and Anthropic are supported in v1.
-- **Max 50 files / 2000 lines default** — Large PRs are skipped by default to control cost and runtime.
-- **Language-agnostic but not language-aware** — Agents infer language from file extensions; there are no language-specific rules or parsers.
+- **Stateless** — each PR is reviewed from scratch; AI Council does not learn from past reviews.
+- **Inline comments land only on changed hunks** — GitHub drops comments outside the lines a PR touches, so findings about unchanged code appear in the summary instead.
+- **Router-gated cost ceiling** — on `standard` depth the router caps specialists (4), so a relevant agent can be skipped on a borderline change. Raise `review_depth: deep` or force the agent on in config.
+- **GitHub Actions only** — no IDE or CLI interface today.
+- **Three providers** — OpenAI, Anthropic, and Fireworks; no custom provider support yet.
+- **Large PRs skipped by default** (50 files / 2000 lines) to control cost and runtime.
+- **Language-agnostic, not language-aware** — agents infer language from file extensions; there are no language-specific parsers.
 
 ---
 
-## Security
+## Roadmap
 
-### Secrets handling
-
-- API keys are passed via GitHub Secrets and are never logged
-- The debug artifact strips any values that look like secrets before upload
-- The action does not persist code or review data outside the workflow run
-
-### Fork behavior
-
-By default, AI Council **skips commenting on pull requests from forks** (`comment_on_forks: false`). This is because `GITHUB_TOKEN` on fork PRs is read-only and cannot post reviews.
-
-If you understand the security trade-offs of `pull_request_target` and want to enable fork reviews, set:
-
-```yaml
-comment_on_forks: true
-```
-
-### PR filtering
-
-The action skips review automatically for:
-- Draft PRs
-- PRs with skip labels (e.g., `skip-ai-review`, `wip`, `do-not-review`)
-- PRs that exceed size limits
+A one-line **GitHub Marketplace Action** (drop-in `uses:` step) and **PyPI packaging** are planned, to reduce installation from the full workflow above to a single line.
 
 ---
 
-## Development
+## Documentation
 
-To run the project locally or contribute:
+| Doc | What's inside |
+|-----|---------------|
+| [docs/agents.md](docs/agents.md) | The six specialists in depth, how the router decides, cross-file awareness, bound skills. |
+| [docs/configuration.md](docs/configuration.md) | Full `config.yaml` reference, env-var overrides, model aliases, mixed-provider and prompt-override examples. |
+| [docs/skills.md](docs/skills.md) | The Skills system — layout, frontmatter, binding patterns, bundled skills, token budgets. |
+| [docs/cost-control.md](docs/cost-control.md) | Budget, typical costs, hard limits, timeouts, debug mode. |
+| [docs/providers.md](docs/providers.md) | OpenAI / Anthropic / Fireworks setup and how to pick models. |
+| [docs/architecture.md](docs/architecture.md) | The LangGraph state machine and data flow, for contributors. |
+| [docs/security.md](docs/security.md) | Secrets handling, fork behavior, PR filtering. |
+| [docs/troubleshooting.md](docs/troubleshooting.md) | Common errors and fixes. |
 
-```bash
-# Clone and enter the repo
-git clone <repo-url>
-cd ai-council-code-review
-
-# Install dependencies
-uv pip install -e ".[dev]"
-
-# Run tests
-pytest
-
-# Lint and type check
-ruff check .
-mypy src/ai_council_review
-```
-
-For full project conventions, branching strategy, and agent architecture, see `AGENTS.md` and `reference.md`.
+Contributor conventions, the agent architecture, and local development setup live in [`AGENTS.md`](AGENTS.md) and [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ---
 
 ## Branching & Release Strategy
 
-This project uses **trunk-based development** with a single long-lived branch:
+This project uses a **Gitflow-lite** model with two long-lived branches:
 
-- **`main`** — Always production-ready. All releases are tagged from `main`.
-- **Feature branches** — Short-lived branches from `main` (e.g., `feature/my-feature`).
+| Branch | Purpose |
+|--------|---------|
+| `develop` | Integration branch. All feature and bugfix branches target `develop`. CI gates run here. |
+| `main` | Release branch. Only receives merges from `develop` when a release is cut. Tags are always from `main`. |
 
-For consumers, we recommend **pinning to a release tag** rather than `main` in your workflow:
+### Contributor flow
+
+```
+develop   ←── feature/my-feature   (PR into develop, CI must pass)
+   │
+   └── (merge to main at release time, then tag)
+main      ←── v1.2.0 tag
+```
+
+1. Branch from `develop`: `git checkout -b feature/my-feature develop`
+2. Open a PR targeting `develop`. CI (tests, lint, type check) must be green.
+3. After review, merge into `develop`.
+4. At release time, `develop` is merged to `main` and a `vX.Y.Z` tag is pushed from `main`.
+
+### Consumer guidance
+
+Pin to a release tag rather than `main` or `develop` in your workflow:
 
 ```yaml
 # Pin to a stable release
@@ -539,11 +251,13 @@ For consumers, we recommend **pinning to a release tag** rather than `main` in y
   uses: actions/checkout@v4
   with:
     repository: Sosoka-Labs/ai-council-code-review
-    ref: v1.0.0          # <-- pin here
+    ref: v0.1.0          # <-- always pin to a release tag
     path: ai-council
 ```
 
-This lets us iterate on `main` without disrupting your workflow. New releases are announced in [CHANGELOG.md](CHANGELOG.md) and [GitHub Releases](https://github.com/Sosoka-Labs/ai-council-code-review/releases).
+`develop` can include in-progress work and is not guaranteed to be stable. `main` is stable but is only updated at release boundaries. Pinning to a tag is the only guarantee of a reproducible, reviewed build.
+
+New releases are announced in [CHANGELOG.md](CHANGELOG.md) and [GitHub Releases](https://github.com/Sosoka-Labs/ai-council-code-review/releases).
 
 ---
 
@@ -553,5 +267,4 @@ MIT License. See [LICENSE](LICENSE) for details.
 
 ---
 
-*Project status: v1.0 — Production-ready*
-*Last updated: 2026-06-08*
+*Project status: v0.1.0 — initial public release. APIs and config may still change before 1.0.*

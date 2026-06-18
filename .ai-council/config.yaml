@@ -1,10 +1,13 @@
-# AI Council — OpenAI pipeline test configuration
-# All agents routed to OpenAI. gpt-4o-mini for cheap classification nodes,
-# gpt-4o for specialist reviewers.
+# AI Council — self-dogfood configuration
+# NOTE: This intentionally differs from the public default (OpenAI/gpt-4.1-mini).
+# Routes every agent to Fireworks.ai so the council can review its own pull
+# requests with the FIREWORKS_API_KEY repository secret. All agents use kimi-k2p6,
+# the model this account's key is entitled to.
+# (review_depth: deep runs all six specialists; drop to "standard" to cap at four.)
 
 version: "1"
 
-review_depth: standard
+review_depth: deep              # uncapped — let every relevant specialist run on our own PRs
 max_files: 60
 max_lines: 3000
 max_diff_size: 150000
@@ -17,6 +20,7 @@ skip_patterns:
   - "package-lock.json"
   - "yarn.lock"
   - "poetry.lock"
+  - "uv.lock"
   - "*.snap"
   - "dist/"
   - "build/"
@@ -29,43 +33,64 @@ total_timeout_seconds: 600
 debug: true
 
 agents:
-  # router and synthesis use the OpenAI provider default (gpt-4o-mini) —
-  # cheap, fast classification. Omitting model_name keeps the config terse.
+  # Classification and merge nodes.
   router:
     enabled: true
-    model: openai
+    model: fireworks
+    model_name: accounts/fireworks/models/kimi-k2p6
     temperature: 0.1
     max_tokens: 2000
 
-  # Specialists pick a stronger model explicitly.
-  security:
+  synthesis:
     enabled: true
-    model: openai
-    model_name: openai/gpt-4o
+    model: fireworks
+    model_name: accounts/fireworks/models/kimi-k2p6
     temperature: 0.2
     max_tokens: 16000
-    skills: [oauth-pitfalls]   # bind the bundled demo skill to this agent
+
+  # Specialists — each with its bound domain skill.
+  security:
+    enabled: true
+    model: fireworks
+    model_name: accounts/fireworks/models/kimi-k2p6
+    temperature: 0.2
+    max_tokens: 16000
+    skills: [oauth-pitfalls]
 
   quality:
     enabled: true
-    model: openai
-    model_name: openai/gpt-4o
+    model: fireworks
+    model_name: accounts/fireworks/models/kimi-k2p6
     temperature: 0.3
     max_tokens: 16000
 
   architecture:
     enabled: true
-    model: openai
-    model_name: openai/gpt-4o
+    model: fireworks
+    model_name: accounts/fireworks/models/kimi-k2p6
     temperature: 0.3
     max_tokens: 16000
 
-  synthesis:
+  performance:
     enabled: true
-    model: openai
-    temperature: 0.2
+    model: fireworks
+    model_name: accounts/fireworks/models/kimi-k2p6
+    temperature: 0.3
     max_tokens: 16000
+    skills: [n-plus-one]
 
-providers:
-  openai:
-    api_key: null
+  documentation:
+    enabled: true
+    model: fireworks
+    model_name: accounts/fireworks/models/kimi-k2p6
+    temperature: 0.3
+    max_tokens: 16000
+    skills: [docstring-style]
+
+  devops:
+    enabled: true
+    model: fireworks
+    model_name: accounts/fireworks/models/kimi-k2p6
+    temperature: 0.3
+    max_tokens: 16000
+    skills: [github-actions-hardening]

@@ -10,7 +10,35 @@ import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
+def _get_canonical_agents() -> list[str]:
+    """Return the canonical agent list derived from the specialist registry.
+
+    Includes the non-specialist fixed nodes (router, synthesis) plus every
+    specialist defined in ``SPECIALIST_AGENTS``.  Called lazily to avoid an
+    import cycle at module load time (config → llm.agents.registry → config).
+    """
+    from ai_council_review.llm.agents.registry import SPECIALIST_AGENTS  # noqa: PLC0415
+
+    specialist_names = [spec.name for spec in SPECIALIST_AGENTS]
+    return ["router", *specialist_names, "synthesis"]
+
+
+# Populated at first access via the public accessor; kept as a module-level
+# list so existing call sites (``from ai_council_review.config import CANONICAL_AGENTS``)
+# continue to work.  Do NOT call _get_canonical_agents() here — it would create
+# a circular import because config.py is loaded before the llm sub-package.
 CANONICAL_AGENTS: list[str] = ["router", "security", "quality", "architecture", "synthesis"]
+
+
+def get_canonical_agents() -> list[str]:
+    """Return the up-to-date canonical agent list from the registry.
+
+    Preferred over the module-level ``CANONICAL_AGENTS`` constant when called
+    after all packages are initialized (e.g., in ``validate_skill_budgets``).
+    """
+    return _get_canonical_agents()
+
 
 # Sentinel string that resolves to "all discovered skills" at runtime.
 ALL_SKILLS = "*"
@@ -22,12 +50,16 @@ ALL_SKILLS = "*"
 SkillSelector = list[str] | Literal["*"] | None
 
 MODEL_ALIASES: dict[str, str] = {
-    "fireworks/llama-3.1-70b": "accounts/fireworks/models/llama-v3p1-70b-instruct",
-    "fireworks/llama-3.1-8b": "accounts/fireworks/models/llama-v3p1-8b-instruct",
+    # Fireworks aliases — retired llama-v3p1-* paths kept for back-compat but
+    # now map to the current kimi-k2p6-turbo router; users should update configs.
+    "fireworks/llama-3.1-70b": "accounts/fireworks/routers/kimi-k2p6-turbo",
+    "fireworks/llama-3.1-8b": "accounts/fireworks/routers/kimi-k2p6-turbo",
     "fireworks/kimi-k2p6": "accounts/fireworks/routers/kimi-k2p6-turbo",
+    # OpenAI aliases
     "openai/gpt-4o": "gpt-4o",
     "openai/gpt-4.1": "gpt-4.1",
     "openai/gpt-4.1-mini": "gpt-4.1-mini",
+    # Anthropic aliases
     "anthropic/claude-sonnet": "claude-sonnet-4-20250514",
     "anthropic/claude-haiku": "claude-3-5-haiku-20241022",
 }
@@ -35,8 +67,8 @@ MODEL_ALIASES: dict[str, str] = {
 # One sensible default per provider, used when the user picks a provider but
 # does not specify a model_name. Users remain free to override on any agent.
 DEFAULT_MODELS_BY_PROVIDER: dict[str, str] = {
-    "fireworks": "accounts/fireworks/routers/kimi-k2p6-turbo",
-    "openai": "gpt-4o-mini",
+    "fireworks": "accounts/fireworks/models/kimi-k2p6",
+    "openai": "gpt-4.1-mini",
     "anthropic": "claude-3-5-haiku-20241022",
 }
 
@@ -62,7 +94,7 @@ class AgentConfig(BaseModel):
     """
 
     enabled: bool = True
-    model: str = "fireworks"
+    model: str = "openai"
     model_name: str | None = None
     temperature: float = 0.3
     max_tokens: int = 16000
@@ -328,7 +360,7 @@ def validate_skill_budgets(
 
     log = structlog.get_logger(__name__)
 
-    for agent_name in CANONICAL_AGENTS:
+    for agent_name in get_canonical_agents():
         # resolve_skills_for_agent enforces both soft (warn) and hard (raise).
         skills = resolve_skills_for_agent(agent_name, config, registry)
         # Emit a per-agent INFO summary at startup so operators can confirm
@@ -355,7 +387,10 @@ def validate_config(config: CouncilConfig) -> None:
     if not enabled_agents:
         # Default agents are implicitly enabled; if the user explicitly
         # disabled everything, we still need a key for the default set.
-        enabled_agents = [(name, AgentConfig()) for name in CANONICAL_AGENTS]
+        # Use get_canonical_agents() (not the stale CANONICAL_AGENTS constant)
+        # so the three new agents (performance, documentation, devops) are
+        # included in API-key validation.
+        enabled_agents = [(name, AgentConfig()) for name in get_canonical_agents()]
 
     missing: list[str] = []
     for name, agent_cfg in enabled_agents:

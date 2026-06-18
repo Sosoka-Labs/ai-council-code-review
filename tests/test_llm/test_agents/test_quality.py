@@ -88,7 +88,7 @@ class TestBuildQualityChain:
         mock_llm = MagicMock()
 
         with patch(
-            "ai_council_review.llm.agents.quality.LLMProviderFactory.from_config",
+            "ai_council_review.llm.agents.specialist.LLMProviderFactory.from_config",
             return_value=mock_llm,
         ):
             chain = build_quality_chain(CouncilConfig())
@@ -102,11 +102,11 @@ class TestBuildQualityChain:
 
         with (
             patch(
-                "ai_council_review.llm.agents.quality.LLMProviderFactory.from_config",
+                "ai_council_review.llm.agents.specialist.LLMProviderFactory.from_config",
                 return_value=mock_llm,
             ),
             patch(
-                "ai_council_review.llm.agents.quality.apply_skills",
+                "ai_council_review.llm.agents.specialist.apply_skills",
                 wraps=lambda prompt, skills: prompt,
             ) as mock_apply,
         ):
@@ -123,11 +123,11 @@ class TestBuildQualityChain:
 
         with (
             patch(
-                "ai_council_review.llm.agents.quality.LLMProviderFactory.from_config",
+                "ai_council_review.llm.agents.specialist.LLMProviderFactory.from_config",
                 return_value=mock_llm,
             ),
             patch(
-                "ai_council_review.llm.agents.quality.apply_skills",
+                "ai_council_review.llm.agents.specialist.apply_skills",
             ) as mock_apply,
         ):
             build_quality_chain(CouncilConfig(), registry=None)
@@ -144,7 +144,7 @@ class TestRunQualityAgent:
         mock_chain.invoke.return_value = _valid_finding_list()
 
         with patch(
-            "ai_council_review.llm.agents.quality.build_quality_chain",
+            "ai_council_review.llm.agents.specialist.build_specialist_chain",
             return_value=mock_chain,
         ):
             findings = run_quality_agent(_make_state(), CouncilConfig(), None)
@@ -167,7 +167,7 @@ class TestRunQualityAgent:
         mock_chain.invoke.side_effect = Exception("structured output parse failure")
 
         with patch(
-            "ai_council_review.llm.agents.quality.build_quality_chain",
+            "ai_council_review.llm.agents.specialist.build_specialist_chain",
             return_value=mock_chain,
         ):
             findings = run_quality_agent(_make_state(), CouncilConfig(), None)
@@ -181,7 +181,7 @@ class TestRunQualityAgent:
 
         with (
             patch(
-                "ai_council_review.llm.agents.quality.build_quality_chain",
+                "ai_council_review.llm.agents.specialist.build_specialist_chain",
                 return_value=mock_chain,
             ),
             pytest.raises(BudgetExceededError),

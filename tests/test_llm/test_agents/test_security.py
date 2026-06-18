@@ -81,7 +81,7 @@ class TestBuildSecurityChain:
         mock_llm = MagicMock()
 
         with patch(
-            "ai_council_review.llm.agents.security.LLMProviderFactory.from_config",
+            "ai_council_review.llm.agents.specialist.LLMProviderFactory.from_config",
             return_value=mock_llm,
         ):
             chain = build_security_chain(CouncilConfig())
@@ -96,11 +96,11 @@ class TestBuildSecurityChain:
 
         with (
             patch(
-                "ai_council_review.llm.agents.security.LLMProviderFactory.from_config",
+                "ai_council_review.llm.agents.specialist.LLMProviderFactory.from_config",
                 return_value=mock_llm,
             ),
             patch(
-                "ai_council_review.llm.agents.security.apply_skills",
+                "ai_council_review.llm.agents.specialist.apply_skills",
                 wraps=lambda prompt, skills: prompt,
             ) as mock_apply,
         ):
@@ -126,11 +126,11 @@ class TestBuildSecurityChain:
 
         with (
             patch(
-                "ai_council_review.llm.agents.security.LLMProviderFactory.from_config",
+                "ai_council_review.llm.agents.specialist.LLMProviderFactory.from_config",
                 return_value=mock_llm,
             ),
             patch(
-                "ai_council_review.llm.agents.security.apply_skills",
+                "ai_council_review.llm.agents.specialist.apply_skills",
                 side_effect=_capturing_apply,
             ),
         ):
@@ -150,7 +150,7 @@ class TestBuildSecurityChain:
         config = CouncilConfig(default_agent_skills=["auth-patterns"])
 
         with patch(
-            "ai_council_review.llm.agents.security.LLMProviderFactory.from_config",
+            "ai_council_review.llm.agents.specialist.LLMProviderFactory.from_config",
             return_value=mock_llm,
         ):
             chain = build_security_chain(config, registry=registry)
@@ -168,7 +168,7 @@ class TestBuildSecurityChain:
         mock_llm = MagicMock()
 
         with patch(
-            "ai_council_review.llm.agents.security.LLMProviderFactory.from_config",
+            "ai_council_review.llm.agents.specialist.LLMProviderFactory.from_config",
             return_value=mock_llm,
         ):
             chain = build_security_chain(CouncilConfig())
@@ -183,13 +183,13 @@ class TestBuildSecurityChain:
         mock_llm = MagicMock()
 
         with patch(
-            "ai_council_review.llm.agents.security.LLMProviderFactory.from_config",
+            "ai_council_review.llm.agents.specialist.LLMProviderFactory.from_config",
             return_value=mock_llm,
         ):
             chain_no_registry = build_security_chain(CouncilConfig())
 
         with patch(
-            "ai_council_review.llm.agents.security.LLMProviderFactory.from_config",
+            "ai_council_review.llm.agents.specialist.LLMProviderFactory.from_config",
             return_value=mock_llm,
         ):
             chain_none = build_security_chain(CouncilConfig(), registry=None)
@@ -208,7 +208,7 @@ class TestRunSecurityAgent:
         mock_chain.invoke.return_value = _valid_finding_list()
 
         with patch(
-            "ai_council_review.llm.agents.security.build_security_chain",
+            "ai_council_review.llm.agents.specialist.build_specialist_chain",
             return_value=mock_chain,
         ):
             findings = run_security_agent(_make_state(), CouncilConfig(), None)
@@ -228,7 +228,7 @@ class TestRunSecurityAgent:
         mock_chain.invoke.side_effect = Exception("structured output parse failure")
 
         with patch(
-            "ai_council_review.llm.agents.security.build_security_chain",
+            "ai_council_review.llm.agents.specialist.build_specialist_chain",
             return_value=mock_chain,
         ):
             findings = run_security_agent(_make_state(), CouncilConfig(), None)
@@ -242,7 +242,7 @@ class TestRunSecurityAgent:
 
         with (
             patch(
-                "ai_council_review.llm.agents.security.build_security_chain",
+                "ai_council_review.llm.agents.specialist.build_specialist_chain",
                 return_value=mock_chain,
             ),
             pytest.raises(BudgetExceededError),

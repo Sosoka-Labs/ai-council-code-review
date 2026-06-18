@@ -34,8 +34,11 @@ def _build_synthesis_variables(state: ReviewState) -> dict[str, Any]:
         state: Current review state.
 
     Returns:
-        Dict of prompt template variables.
+        Dict of prompt template variables, including ``categories`` derived
+        from the agent registry so the synthesis prompt auto-adapts.
     """
+    from ai_council_review.llm.agents.registry import SPECIALIST_AGENTS
+
     all_findings: list[dict[str, Any]] = []
     for agent_name, findings in state.agent_outputs.items():
         for finding in findings:
@@ -59,11 +62,16 @@ def _build_synthesis_variables(state: ReviewState) -> dict[str, Any]:
     pr_number = pr.number if pr else 0
     repo = pr.html_url if pr else ""
 
+    # Build categories string from registry for Jinja2 slot injection.
+    category_names = [spec.category.capitalize() for spec in SPECIALIST_AGENTS]
+    categories = ", ".join(category_names)
+
     return {
         "repo": repo,
         "pr_number": pr_number,
         "pr_title": pr_title,
         "findings_json": findings_json,
+        "categories": categories,
     }
 
 

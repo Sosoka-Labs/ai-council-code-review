@@ -10,6 +10,17 @@ from ai_council_review.models.pr import FileInfo, PRMetadata
 from ai_council_review.models.review import CostRecord, Finding, ReviewComment
 
 
+def _default_agents_needed() -> list[str]:
+    """Return the default agent list derived from the specialist registry.
+
+    Using a factory function avoids a module-level import cycle while still
+    keeping the default in sync with ``SPECIALIST_AGENTS`` at runtime.
+    """
+    from ai_council_review.llm.agents.registry import SPECIALIST_AGENTS
+
+    return [spec.name for spec in SPECIALIST_AGENTS if spec.enabled_by_default]
+
+
 def _merge_agent_outputs(
     left: dict[str, list[Finding]],
     right: dict[str, list[Finding]],
@@ -36,9 +47,7 @@ class ReviewState(BaseModel):
     synthesis: str | None = None
     github_comments: list[ReviewComment] = Field(default_factory=list)
     summary: str | None = None
-    agents_needed: list[str] = Field(
-        default_factory=lambda: ["security", "quality", "architecture"]
-    )
+    agents_needed: list[str] = Field(default_factory=_default_agents_needed)
     review_depth: str = "standard"
     verdict: str = "comment"
     skipped: bool = False
