@@ -142,6 +142,22 @@ def run_router_agent(
         variables = _build_router_variables(state, config)
         run_config = {"callbacks": callbacks} if callbacks else None
         result = chain.invoke(variables, config=run_config)
+
+        # Reasoning models (e.g. kimi-k2p6) may return None from
+        # with_structured_output when they wrap JSON in prose instead of
+        # emitting bare JSON.  Detect this early so we produce a clear log
+        # message rather than a confusing AttributeError downstream.
+        if result is None or not hasattr(result, "agents_needed"):
+            logger.warning(
+                "Router returned None or unexpected type — falling back to all agents",
+                result_type=type(result).__name__,
+            )
+            return RouterOutput(
+                agents_needed=_DEFAULT_AGENTS,
+                review_depth="standard",
+                reasoning="Router structured output was None, defaulting to all agents",
+            )
+
         router_output = cast(RouterOutput, result)
         logger.info(
             "Router complete",

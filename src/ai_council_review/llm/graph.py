@@ -112,16 +112,22 @@ def router_node(
 
     result = run_router_agent(state, config, registry=registry)
 
+    # Effective depth: escalate to "deep" if either the router or the user's
+    # config requests it.  This means `review_depth: deep` in .ai-council/config.yaml
+    # is always honored — previously config.review_depth was never consulted here.
+    effective_depth = (
+        "deep" if config.review_depth == "deep" or result.review_depth == "deep" else "standard"
+    )
+
     # M4 guardrail: cap parallel specialists for standard depth.
     # "deep" depth is intentionally uncapped to allow all requested specialists.
     agents_needed = result.agents_needed
-    review_depth = result.review_depth
-    if review_depth == "standard":
+    if effective_depth == "standard":
         agents_needed = agents_needed[:_MAX_SPECIALISTS_STANDARD]
         if len(result.agents_needed) > _MAX_SPECIALISTS_STANDARD:
             logger.info(
                 "M4: capped specialists for review depth",
-                depth=review_depth,
+                depth=effective_depth,
                 original=result.agents_needed,
                 capped=agents_needed,
             )
@@ -129,12 +135,12 @@ def router_node(
     logger.info(
         "Router complete",
         agents=agents_needed,
-        depth=review_depth,
+        depth=effective_depth,
     )
 
     return {
         "agents_needed": agents_needed,
-        "review_depth": review_depth,
+        "review_depth": effective_depth,
     }
 
 

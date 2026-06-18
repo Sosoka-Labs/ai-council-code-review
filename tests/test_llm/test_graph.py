@@ -519,3 +519,43 @@ class TestM4CapGuardrail:
         four_agents = ["security", "quality", "architecture", "performance"]
         result = self._run_router_node_with(four_agents, "deep")
         assert result["agents_needed"] == four_agents
+
+    def test_config_review_depth_deep_overrides_standard_router_output(self) -> None:
+        """config.review_depth='deep' lifts the M4 cap even when the router
+        returns 'standard' depth — the user's configured depth must be honored."""
+        six_agents = [
+            "security",
+            "quality",
+            "architecture",
+            "performance",
+            "documentation",
+            "devops",
+        ]
+        # Router says "standard"; config says "deep" — config wins.
+        config = CouncilConfig(review_depth="deep")
+        state = ReviewState(
+            pr_metadata=PRMetadata(
+                number=1,
+                title="Test",
+                state="open",
+                author="alice",
+                author_association="CONTRIBUTOR",
+                base_ref="main",
+                base_sha="base",
+                head_ref="feat",
+                head_sha="head",
+            ),
+            changed_files=[FileInfo(filename="src/main.py", status="modified")],
+        )
+
+        mock_output = MagicMock()
+        mock_output.agents_needed = six_agents
+        mock_output.review_depth = "standard"  # router says standard
+
+        with patch("ai_council_review.llm.graph.run_router_agent", return_value=mock_output):
+            result = router_node(state, config)
+
+        # All 6 specialists must pass through — M4 cap must NOT apply.
+        assert len(result["agents_needed"]) == 6
+        assert result["agents_needed"] == six_agents
+        assert result["review_depth"] == "deep"
