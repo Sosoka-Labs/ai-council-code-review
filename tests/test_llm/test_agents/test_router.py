@@ -150,6 +150,26 @@ class TestRunRouterAgent:
         assert result.review_depth == "standard"
         assert "Router failed" in result.reasoning
 
+    def test_run_router_agent_falls_back_when_chain_returns_none(self) -> None:
+        """When chain.invoke returns None (reasoning-model behaviour), a safe
+        fallback RouterOutput is returned instead of raising AttributeError."""
+        mock_chain = MagicMock()
+        mock_chain.invoke.return_value = None
+
+        with patch(
+            "ai_council_review.llm.agents.router.build_router_chain",
+            return_value=mock_chain,
+        ):
+            result = run_router_agent(_make_state(), CouncilConfig())
+
+        from ai_council_review.llm.agents.registry import SPECIALIST_AGENTS
+
+        assert isinstance(result, RouterOutput)
+        expected = {spec.name for spec in SPECIALIST_AGENTS if spec.enabled_by_default}
+        assert set(result.agents_needed) == expected
+        assert result.review_depth == "standard"
+        assert "None" in result.reasoning
+
     def test_run_router_agent_propagates_budget_error(self) -> None:
         """BudgetExceededError raised during routing is re-raised immediately.
 
