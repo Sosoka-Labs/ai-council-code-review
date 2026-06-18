@@ -50,12 +50,16 @@ ALL_SKILLS = "*"
 SkillSelector = list[str] | Literal["*"] | None
 
 MODEL_ALIASES: dict[str, str] = {
-    "fireworks/llama-3.1-70b": "accounts/fireworks/models/llama-v3p1-70b-instruct",
-    "fireworks/llama-3.1-8b": "accounts/fireworks/models/llama-v3p1-8b-instruct",
+    # Fireworks aliases — retired llama-v3p1-* paths kept for back-compat but
+    # now map to the current kimi-k2p6-turbo router; users should update configs.
+    "fireworks/llama-3.1-70b": "accounts/fireworks/routers/kimi-k2p6-turbo",
+    "fireworks/llama-3.1-8b": "accounts/fireworks/routers/kimi-k2p6-turbo",
     "fireworks/kimi-k2p6": "accounts/fireworks/routers/kimi-k2p6-turbo",
+    # OpenAI aliases
     "openai/gpt-4o": "gpt-4o",
     "openai/gpt-4.1": "gpt-4.1",
     "openai/gpt-4.1-mini": "gpt-4.1-mini",
+    # Anthropic aliases
     "anthropic/claude-sonnet": "claude-sonnet-4-20250514",
     "anthropic/claude-haiku": "claude-3-5-haiku-20241022",
 }
@@ -63,8 +67,8 @@ MODEL_ALIASES: dict[str, str] = {
 # One sensible default per provider, used when the user picks a provider but
 # does not specify a model_name. Users remain free to override on any agent.
 DEFAULT_MODELS_BY_PROVIDER: dict[str, str] = {
-    "fireworks": "accounts/fireworks/routers/kimi-k2p6-turbo",
-    "openai": "gpt-4o-mini",
+    "fireworks": "accounts/fireworks/models/kimi-k2p6",
+    "openai": "gpt-4.1-mini",
     "anthropic": "claude-3-5-haiku-20241022",
 }
 
@@ -90,7 +94,7 @@ class AgentConfig(BaseModel):
     """
 
     enabled: bool = True
-    model: str = "fireworks"
+    model: str = "openai"
     model_name: str | None = None
     temperature: float = 0.3
     max_tokens: int = 16000

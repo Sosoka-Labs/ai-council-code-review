@@ -24,35 +24,35 @@ agents:
   router:
     enabled: true
     model: fireworks
-    model_name: accounts/fireworks/models/llama-v3p1-70b-instruct
+    model_name: accounts/fireworks/models/kimi-k2p6
     temperature: 0.1
     max_tokens: 2000
 
   security:
     enabled: true
     model: fireworks
-    model_name: accounts/fireworks/models/llama-v3p1-70b-instruct
+    model_name: accounts/fireworks/models/kimi-k2p6
     temperature: 0.2
     max_tokens: 4000
 
   quality:
     enabled: true
     model: fireworks
-    model_name: accounts/fireworks/models/llama-v3p1-70b-instruct
+    model_name: accounts/fireworks/models/kimi-k2p6
     temperature: 0.3
     max_tokens: 4000
 
   architecture:
     enabled: true
     model: fireworks
-    model_name: accounts/fireworks/models/llama-v3p1-70b-instruct
+    model_name: accounts/fireworks/models/kimi-k2p6
     temperature: 0.3
     max_tokens: 4000
 
   synthesis:
     enabled: true
     model: fireworks
-    model_name: accounts/fireworks/models/llama-v3p1-70b-instruct
+    model_name: accounts/fireworks/models/kimi-k2p6
     temperature: 0.2
     max_tokens: 4000
 

@@ -3,7 +3,10 @@
 # Copy this file to .ai-council/config.yaml in your repository root
 # to customize agents, models, and review behavior.
 #
-# If this file is missing, AI Council uses sensible defaults.
+# Default provider: OpenAI. Set OPENAI_API_KEY in your environment or in the
+# providers section below before running.
+#
+# If this file is missing, AI Council uses sensible defaults (OpenAI + gpt-4.1-mini).
 
 version: "1"
 
@@ -40,11 +43,11 @@ rate_limit_threshold: 50        # Enter conservative mode below this threshold
 # Each agent can be enabled/disabled, assigned a model and provider,
 # and given a custom system prompt.
 #
-# `model` is the provider name: fireworks, openai, or anthropic
+# `model` is the provider name: openai, anthropic, or fireworks
 # `model_name` can be a full model identifier or a shorthand alias:
-#   fireworks/llama-3.1-70b, fireworks/llama-3.1-8b, fireworks/kimi-k2p6
-#   openai/gpt-4o, openai/gpt-4.1, openai/gpt-4.1-mini
+#   openai/gpt-4.1, openai/gpt-4.1-mini
 #   anthropic/claude-sonnet, anthropic/claude-haiku
+#   fireworks/kimi-k2p6
 # `temperature` controls creativity vs determinism
 # `max_tokens` caps the response length
 
@@ -53,16 +56,16 @@ agents:
   # Use a fast, cheap model here — it only classifies.
   router:
     enabled: true
-    model: fireworks
-    model_name: fireworks/llama-3.1-8b   # fast, cheap
+    model: openai
+    model_name: openai/gpt-4.1-mini   # fast, cheap
     temperature: 0.1
     max_tokens: 2000
 
   # Security checks for vulnerabilities, secrets, auth issues, and injection risks.
   security:
     enabled: true
-    model: fireworks
-    model_name: fireworks/llama-3.1-70b
+    model: openai
+    model_name: openai/gpt-4.1
     temperature: 0.2
     max_tokens: 16000
     skills: [oauth-pitfalls]             # bind the bundled demo skill to this agent
@@ -70,8 +73,8 @@ agents:
   # Quality checks for bugs, logic errors, type safety, missing tests, and readability.
   quality:
     enabled: true
-    model: fireworks
-    model_name: fireworks/llama-3.1-70b
+    model: openai
+    model_name: openai/gpt-4.1
     temperature: 0.3
     max_tokens: 16000
 
@@ -79,8 +82,8 @@ agents:
   # and dependency alignment.
   architecture:
     enabled: true
-    model: fireworks
-    model_name: fireworks/llama-3.1-70b
+    model: openai
+    model_name: openai/gpt-4.1
     temperature: 0.3
     max_tokens: 16000
 
@@ -90,8 +93,8 @@ agents:
   # code appears in the diff.
   performance:
     enabled: true
-    model: fireworks
-    model_name: fireworks/llama-3.1-70b
+    model: openai
+    model_name: openai/gpt-4.1
     temperature: 0.3
     max_tokens: 16000
     skills: [n-plus-one]                 # bind N+1 detection guidance
@@ -101,8 +104,8 @@ agents:
   # Triggered when *.md, public function/class signatures, or new exports change.
   documentation:
     enabled: true
-    model: fireworks
-    model_name: fireworks/llama-3.1-70b
+    model: openai
+    model_name: openai/gpt-4.1
     temperature: 0.3
     max_tokens: 16000
     skills: [docstring-style]            # bind docstring style guidance
@@ -112,8 +115,8 @@ agents:
   # Triggered when .github/workflows/*, Dockerfile, *.tf, *.sh files change.
   devops:
     enabled: true
-    model: fireworks
-    model_name: fireworks/llama-3.1-70b
+    model: openai
+    model_name: openai/gpt-4.1
     temperature: 0.3
     max_tokens: 16000
     skills: [github-actions-hardening]   # bind Actions hardening guidance
@@ -122,8 +125,8 @@ agents:
   # the final review. Use a strong reasoning model here.
   synthesis:
     enabled: true
-    model: fireworks
-    model_name: fireworks/kimi-k2p6      # strong reasoning
+    model: openai
+    model_name: openai/gpt-4.1-mini
     temperature: 0.2
     max_tokens: 16000
 
@@ -159,13 +162,15 @@ agents:
 #   github-actions-hardening → devops agent: Actions security and correctness
 
 # ── LLM Provider Settings ───────────────────────────────────────────────────
-# API keys are loaded from environment variables (FIREWORKS_API_KEY, etc.)
-# but you can hardcode them here if needed (not recommended for public repos).
+# Set OPENAI_API_KEY in your environment — that is all you need for the default
+# configuration above. Anthropic and Fireworks are also supported if you prefer
+# those providers; just change the model/model_name fields above and supply the
+# corresponding API key.
 
 providers:
-  fireworks:
-    api_key: null
   openai:
-    api_key: null
+    api_key: null    # reads OPENAI_API_KEY from environment
   anthropic:
-    api_key: null
+    api_key: null    # reads ANTHROPIC_API_KEY from environment
+  fireworks:
+    api_key: null    # reads FIREWORKS_API_KEY from environment

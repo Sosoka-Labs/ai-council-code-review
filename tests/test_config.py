@@ -29,19 +29,25 @@ class TestAgentConfig:
         """Test default agent config values."""
         config = AgentConfig()
         assert config.enabled is True
-        assert config.model == "fireworks"
+        assert config.model == "openai"
         assert config.temperature == 0.3
         assert config.max_tokens == 16000
+
+    def test_zero_config_resolves_to_openai_gpt41mini(self) -> None:
+        """Zero-config AgentConfig() defaults to openai provider + gpt-4.1-mini model."""
+        config = AgentConfig()
+        assert config.model == "openai"
+        assert config.model_name == "gpt-4.1-mini"
 
     def test_model_name_default_for_fireworks(self) -> None:
         """Provider default fills in when model_name is not specified."""
         config = AgentConfig(model="fireworks")
-        assert config.model_name == "accounts/fireworks/routers/kimi-k2p6-turbo"
+        assert config.model_name == "accounts/fireworks/models/kimi-k2p6"
 
     def test_model_name_default_for_openai(self) -> None:
-        """OpenAI provider gets gpt-4o-mini default when model_name omitted."""
+        """OpenAI provider gets gpt-4.1-mini default when model_name omitted."""
         config = AgentConfig(model="openai")
-        assert config.model_name == "gpt-4o-mini"
+        assert config.model_name == "gpt-4.1-mini"
 
     def test_model_name_default_for_anthropic(self) -> None:
         """Anthropic provider gets a haiku default when model_name omitted."""
@@ -54,9 +60,13 @@ class TestAgentConfig:
         assert config.model_name == "gpt-4o"
 
     def test_alias_resolution_still_works(self) -> None:
-        """Alias form is resolved to long-form model id."""
+        """Alias form is resolved to the current canonical model id.
+
+        The retired llama-3.1-70b alias now maps to kimi-k2p6-turbo so that
+        configs written against the old Fireworks model IDs keep working.
+        """
         config = AgentConfig(model="fireworks", model_name="fireworks/llama-3.1-70b")
-        assert config.model_name == "accounts/fireworks/models/llama-v3p1-70b-instruct"
+        assert config.model_name == "accounts/fireworks/routers/kimi-k2p6-turbo"
 
     def test_unknown_provider_raises_when_model_name_missing(self) -> None:
         """A provider without a default and no model_name yields a clear error."""
@@ -212,8 +222,8 @@ class TestValidateConfig:
     ) -> None:
         """When no agents are configured, CANONICAL_AGENTS are used for validation.
 
-        Providing a key for the default provider (fireworks) satisfies all
-        canonical agents because AgentConfig defaults to model="fireworks".
+        Providing a key for the default provider (openai) satisfies all
+        canonical agents because AgentConfig defaults to model="openai".
         """
         # Clear any leaked keys first
         for var in ("FIREWORKS_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
@@ -236,8 +246,8 @@ class TestValidateConfig:
         for agent_name in CANONICAL_AGENTS:
             assert agent_name in error_message
 
-        # With a fireworks key, validation passes for the default agent config
-        monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test-key")
+        # With an OpenAI key, validation passes for the default agent config
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test-key")
         config_with_key = CouncilConfig()
         validate_config(config_with_key)  # should not raise
 
@@ -247,8 +257,8 @@ class TestValidateConfig:
         """C-2: validate_config checks ALL registry agents (including the three new
         ones: performance, documentation, devops) when no agents are configured.
 
-        A zero-config user with only OPENAI_API_KEY set should fail validation
-        because all six specialists default to the 'fireworks' provider.
+        With no API keys at all, all canonical agents (defaulting to 'openai')
+        must appear in the error message.
         """
         from ai_council_review.config import get_canonical_agents
         from ai_council_review.exceptions import ConfigError
@@ -284,17 +294,15 @@ class TestValidateConfig:
                 f"New agent '{new_agent}' not validated — stale CANONICAL_AGENTS still in use."
             )
 
-    def test_validate_config_openai_only_key_fails_for_fireworks_default_agents(
+    def test_validate_config_openai_only_key_passes_for_openai_default_agents(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """C-2 integration: a single OPENAI_API_KEY does NOT satisfy zero-config validation.
+        """C-2 integration: a single OPENAI_API_KEY satisfies zero-config validation.
 
-        All default agents use model='fireworks', so only FIREWORKS_API_KEY
-        should make zero-config validation pass.
+        All default agents now use model='openai', so OPENAI_API_KEY alone is
+        sufficient to pass validation when no explicit agent config is supplied.
         """
-        from ai_council_review.exceptions import ConfigError
-
-        # Set only the OpenAI key.
+        # Set only the OpenAI key; clear all others.
         for var in ("FIREWORKS_API_KEY", "ANTHROPIC_API_KEY"):
             monkeypatch.delenv(var, raising=False)
         for var in ("AI_COUNCIL__FIREWORKS_API_KEY", "AI_COUNCIL__ANTHROPIC_API_KEY"):
@@ -302,8 +310,7 @@ class TestValidateConfig:
         monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-test-key")
 
         config = CouncilConfig()  # no explicit agents — uses all defaults
-        with pytest.raises(ConfigError):
-            validate_config(config)
+        validate_config(config)  # should not raise
 
 
 class TestSkillSelector:

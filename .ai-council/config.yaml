@@ -1,7 +1,8 @@
 # AI Council — self-dogfood configuration
-# Routes every agent to Fireworks.ai (the default provider) so the council can
-# review its own pull requests with the FIREWORKS_API_KEY repository secret.
-# All agents use kimi-k2p6, the model this account's key is entitled to.
+# NOTE: This intentionally differs from the public default (OpenAI/gpt-4.1-mini).
+# Routes every agent to Fireworks.ai so the council can review its own pull
+# requests with the FIREWORKS_API_KEY repository secret. All agents use kimi-k2p6,
+# the model this account's key is entitled to.
 # (review_depth: deep runs all six specialists; drop to "standard" to cap at four.)
 
 version: "1"
