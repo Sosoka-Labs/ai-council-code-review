@@ -21,6 +21,10 @@ jobs:
     name: Analyze (Python)
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Code scanning requires GitHub Code Security, which is free on public
+    # repositories but unavailable on private ones. Skip while private so the
+    # check stays green; it activates automatically once the repo goes public.
+    if: github.event.repository.visibility == 'public'
 
     steps:
       - name: Checkout
