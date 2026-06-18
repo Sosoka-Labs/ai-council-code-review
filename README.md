@@ -157,7 +157,7 @@ Open a pull request and AI Council will post a review.
 
 ## Skills
 
-Skills are versioned `SKILL.md` files that inject project-specific knowledge — conventions, known pitfalls, domain rules — into a specialist's prompt. Bind them per agent, by a `"*"` sentinel, or as a default. Four demo skills ship in the repo, wired to the security, performance, documentation, and devops agents.
+Skills are versioned `SKILL.md` files **you add to your own repository** under `.ai-council/skills/` to inject project-specific knowledge — conventions, known pitfalls, domain rules — into a specialist's prompt. They are **opt-in**: no agent has a skill bound by default. You attach them in your config per agent, with a `"*"` sentinel, or as a repo-wide default. This repo ships four example skills (for the security, performance, documentation, and devops agents) you can copy as a starting point.
 
 → See [docs/skills.md](docs/skills.md)
 
