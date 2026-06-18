@@ -105,7 +105,7 @@ develop   ← Integration branch. All feature/bugfix branches target here.
 **Key Rules:**
 - `develop` is the **integration branch** where all day-to-day work lands
 - `main` is the **release branch** — only receives merges from `develop` at release time
-- Tags (`v1.0.0`, `v1.1.0`, etc.) are always cut from `main`
+- Tags (`v0.1.0`, `v0.2.0`, etc.) are always cut from `main`
 - All changes require a **Pull Request + CI green + review**; no direct pushes
 - Branch names follow the pattern: `type/descriptive-name`
 

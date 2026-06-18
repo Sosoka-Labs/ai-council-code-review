@@ -3,7 +3,7 @@
 [![CI](https://github.com/Sosoka-Labs/ai-council-code-review/actions/workflows/ci.yml/badge.svg)](https://github.com/Sosoka-Labs/ai-council-code-review/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-1.0.0-green.svg)](https://github.com/Sosoka-Labs/ai-council-code-review/releases)
+[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/Sosoka-Labs/ai-council-code-review/releases)
 
 **A council of specialist AI agents that reviews your pull requests — and reads the rest of your repo to catch what a diff alone can't.**
 
@@ -251,7 +251,7 @@ Pin to a release tag rather than `main` or `develop` in your workflow:
   uses: actions/checkout@v4
   with:
     repository: Sosoka-Labs/ai-council-code-review
-    ref: v1.0.0          # <-- always pin to a release tag
+    ref: v0.1.0          # <-- always pin to a release tag
     path: ai-council
 ```
 
@@ -267,4 +267,4 @@ MIT License. See [LICENSE](LICENSE) for details.
 
 ---
 
-*Project status: v1.0 — Production-ready*
+*Project status: v0.1.0 — initial public release. APIs and config may still change before 1.0.*
