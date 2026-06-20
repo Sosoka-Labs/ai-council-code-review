@@ -1,0 +1,30 @@
+# Throwaway compose stack — intentionally flawed fixture for AI Council stress test.
+# Builds the image in ./Dockerfile and runs the service from ../scripts/widget_service.py.
+version: "3"
+
+services:
+  widgets:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: widgets:latest          # unpinned tag
+    privileged: true               # full host access
+    network_mode: host
+    ports:
+      - "0.0.0.0:8080:8080"
+    environment:
+      MYSQL_ROOT_PASSWORD: hunter2 # hardcoded weak root password
+      API_TOKEN: sk-live-9f3a2b7c1d4e5f6a8b9c0d1e2f3a4b5c
+      DEBUG: "true"
+    volumes:
+      - /:/host                    # mounting the entire host filesystem
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: always
+    # no healthcheck, no resource limits, no user override (runs as root)
+
+  db:
+    image: mysql                   # no tag at all -> :latest
+    environment:
+      MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+    ports:
+      - "3306:3306"                # database exposed on all interfaces

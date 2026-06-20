@@ -64,6 +64,8 @@ packages = ["src/ai_council_review"]
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+# Throwaway stress-test fixtures are intentionally flawed; do not lint them.
+extend-exclude = ["throwaway/"]
 
 [tool.ruff.lint]
 select = [
