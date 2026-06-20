@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-20
+
+Caps the number of inline comments per review. A real PR produced 77 findings; posting all of them as inline comments in a single review triggered a GitHub `502` and the secondary content-creation rate limit, and the review failed to post. Inline comments are now ranked and capped.
+
+### Added
+
+- **`max_inline_comments`** (default `20`) — hard cap on inline comments posted per review. Findings beyond the cap are listed in the review body instead of dropped.
+- **`min_confidence`** (default `0.0`) — minimum finding confidence required to post inline; lower-confidence findings are withheld to the body.
+
+### Changed
+
+- **Inline comments are now ranked and capped.** Findings are deduplicated, filtered by `min_confidence`, ranked by severity (then confidence as a tiebreaker), and limited to `max_inline_comments`. Withheld findings (over the cap, below the threshold, or outside changed lines) are enumerated in the review body so nothing is lost. Previously every finding was posted inline.
+- Review comment batch size lowered from 100 to 30 as defense-in-depth against oversized-review `502`s.
+
 ## [0.1.1] - 2026-06-20
 
 Bugfix release. Eliminates a review hang caused by GitHub API rate limiting during cross-file browsing.
@@ -38,6 +52,7 @@ Initial public release.
 - **CI/CD & repo automation** — SHA-pinned actions, least-privilege workflow permissions, concurrency control, dependency caching, Dependabot, CodeQL scanning (on public repos), an automated release workflow, and a PR template.
 - **Stateless design** — no database, vector store, or persistence layer.
 
-[Unreleased]: https://github.com/Sosoka-Labs/ai-council-code-review/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/Sosoka-Labs/ai-council-code-review/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Sosoka-Labs/ai-council-code-review/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/Sosoka-Labs/ai-council-code-review/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Sosoka-Labs/ai-council-code-review/releases/tag/v0.1.0

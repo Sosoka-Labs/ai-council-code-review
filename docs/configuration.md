@@ -133,6 +133,17 @@ providers:
 | `skip_labels` | `[skip-ai-review, wip]` | Skip PRs carrying any of these labels. |
 | `skip_patterns` | lockfiles, build dirs, etc. | Exact names, directory prefixes, or globs (`*.snap`, `**/*.pyc`). |
 
+## Inline comment limits
+
+Large PRs can produce dozens of findings. Posting them all as inline comments risks GitHub 502 errors and secondary rate-limit penalties. Two knobs control the comment volume:
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `max_inline_comments` | `20` | Hard cap on inline comments per review. Findings are ranked by severity (critical → info) and confidence before the cap is applied; the highest-priority ones are posted inline. |
+| `min_confidence` | `0.0` | Drop findings whose agent-assigned confidence score is below this threshold (range `0.0`–`1.0`). |
+
+Findings that are withheld — whether by the confidence threshold, the inline cap, or because their line is not in the diff — are still listed in the review body so nothing is silently lost.
+
 Cost and timeout settings are documented in [docs/cost-control.md](cost-control.md).
 
 ## Environment variable overrides

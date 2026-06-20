@@ -177,6 +177,8 @@ class CouncilConfig(BaseModel):
     rate_limit_threshold: int = 50
     agents: dict[str, AgentConfig] = Field(default_factory=dict)
     providers: dict[str, ProviderConfig] = Field(default_factory=dict)
+    max_inline_comments: int = Field(default=20, ge=0)
+    min_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     skills_path: str = ".ai-council/skills"
     default_agent_skills: SkillSelector = None
     skills_token_budget_soft: int = 8000
