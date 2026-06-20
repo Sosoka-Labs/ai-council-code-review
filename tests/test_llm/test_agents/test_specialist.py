@@ -258,8 +258,82 @@ class TestRunSpecialistAgent:
         _, kwargs = mock_build.call_args
         assert kwargs.get("browser") is mock_browser
 
-    def test_no_browser_when_no_token_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """When GITHUB_TOKEN is absent, _make_browser_from_env returns None."""
+    def test_no_browser_when_no_token_env(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When outside a checkout and no token is set, _make_browser_from_env returns None."""
+        # Change to a directory with no .git so the checkout path is skipped.
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+        monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+
+        from ai_council_review.llm.agents.specialist import _make_browser_from_env
+
+        assert _make_browser_from_env() is None
+
+
+class TestMakeBrowserFromEnv:
+    """Tests for the _make_browser_from_env factory function.
+
+    Verifies the new filesystem-first logic:
+    - Inside a local checkout → RepositoryBrowser with github_client=None.
+    - Outside a checkout but with token+repo → RepositoryBrowser with a client.
+    - Outside a checkout and no credentials → None.
+    """
+
+    def test_inside_checkout_returns_browser_with_no_client(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When inside a git checkout, github_client must be None.
+
+        Browsers with no client make zero GitHub API calls, which prevents the
+        rate-limit hang described in the pilot incident.
+        """
+        # Create a minimal .git directory so _find_git_root finds a checkout.
+        (tmp_path / ".git").mkdir()
+        monkeypatch.chdir(tmp_path)
+
+        # Even if a token is present, the local checkout takes precedence.
+        monkeypatch.setenv("GITHUB_TOKEN", "ghs_fake")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+
+        from ai_council_review.llm.agents.specialist import _make_browser_from_env
+
+        browser = _make_browser_from_env()
+
+        assert browser is not None
+        assert browser.github_client is None
+
+    def test_outside_checkout_with_token_attaches_client(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Outside a checkout the API client is attached when credentials exist.
+
+        GitHubClient is imported lazily inside _make_browser_from_env, so we
+        patch it at its definition module rather than the specialist module.
+        """
+        # tmp_path has no .git directory — simulates running outside a repo.
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("GITHUB_TOKEN", "ghs_fake")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+
+        from ai_council_review.llm.agents.specialist import _make_browser_from_env
+
+        # Patch at the source module because the import is deferred (lazy).
+        with patch("ai_council_review.github.client.GitHubClient") as mock_cls:
+            mock_client_instance = MagicMock()
+            mock_cls.return_value = mock_client_instance
+            browser = _make_browser_from_env()
+
+        assert browser is not None
+        assert browser.github_client is mock_client_instance
+        mock_cls.assert_called_once_with("ghs_fake", "owner/repo")
+
+    def test_outside_checkout_no_credentials_returns_none(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Outside a checkout with no token, None is returned."""
+        monkeypatch.chdir(tmp_path)
         monkeypatch.delenv("GITHUB_TOKEN", raising=False)
         monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
 

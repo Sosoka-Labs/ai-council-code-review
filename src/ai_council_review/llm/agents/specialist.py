@@ -34,6 +34,7 @@ Security note:
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any
 
 import structlog
@@ -112,12 +113,54 @@ def _build_agent_variables(state: ReviewState, config: CouncilConfig) -> dict[st
     }
 
 
-def _make_browser_from_env() -> RepositoryBrowser | None:
-    """Construct a RepositoryBrowser when a GitHub token is available.
+def _find_git_root(cwd: Path) -> Path | None:
+    """Return the git work-tree root at or above *cwd*, or None.
 
-    Returns None when running in dry-run / fork / no-token context so the
-    chain degrades gracefully to diff-only mode.
+    Walks upward looking for a ``.git`` entry rather than spawning a subprocess,
+    keeping this check fast and side-effect free.  Returning the root (not just a
+    bool) lets callers anchor the browser at the repo root even when invoked from
+    a nested subdirectory, so diff-relative paths resolve correctly.
+
+    Args:
+        cwd: Directory to inspect.
+
+    Returns:
+        The directory containing ``.git``, or None when *cwd* is not inside a
+        git checkout.
     """
+    # Walk upwards — stop at the filesystem root.
+    for candidate in [cwd, *cwd.parents]:
+        if (candidate / ".git").exists():
+            return candidate
+    return None
+
+
+def _make_browser_from_env() -> RepositoryBrowser | None:
+    """Construct a RepositoryBrowser appropriate for the current environment.
+
+    Resolution order:
+    1. If the process is running inside a local git checkout (the common CI
+       case where the target repo is already checked out on disk), return a
+       browser with **no** GitHub client attached.  This makes browsing zero
+       API calls — all file reads go directly to the filesystem.
+    2. If we are NOT inside a checkout but a ``GITHUB_TOKEN`` and
+       ``GITHUB_REPOSITORY`` are set, attach a ``GitHubClient`` so the browser
+       can fall back to the Contents API.
+    3. Return ``None`` when neither a checkout nor API credentials are
+       available — callers degrade gracefully to diff-only mode.
+
+    The local-checkout check deliberately avoids spawning a subprocess (uses
+    ``.git`` detection) to keep the hot path fast.
+    """
+    git_root = _find_git_root(Path.cwd())
+    if git_root is not None:
+        logger.debug(
+            "Local git checkout detected; building filesystem-only browser",
+            repo_path=str(git_root),
+        )
+        return RepositoryBrowser(repo_path=git_root, github_client=None)
+
+    # No local checkout — fall back to API-backed browser if credentials exist.
     token = os.environ.get("GITHUB_TOKEN")
     repo = os.environ.get("GITHUB_REPOSITORY", "")
     if not token or not repo:
@@ -125,6 +168,10 @@ def _make_browser_from_env() -> RepositoryBrowser | None:
 
     from ai_council_review.github.client import GitHubClient
 
+    logger.debug(
+        "No local checkout; building API-backed browser",
+        repo=repo,
+    )
     client = GitHubClient(token, repo)
     return RepositoryBrowser(github_client=client)
 
