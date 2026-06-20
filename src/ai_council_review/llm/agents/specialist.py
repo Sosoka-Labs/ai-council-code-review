@@ -154,7 +154,10 @@ def _make_browser_from_env() -> RepositoryBrowser | None:
     """
     git_root = _find_git_root(Path.cwd())
     if git_root is not None:
-        logger.debug(
+        # INFO, not DEBUG: which browser mode we pick is the exact decision that
+        # separates a fast filesystem review from the GitHub-API rate-limit hang
+        # that stalled the pilot. Keep it visible at the default log level.
+        logger.info(
             "Local git checkout detected; building filesystem-only browser",
             repo_path=str(git_root),
         )
@@ -168,7 +171,7 @@ def _make_browser_from_env() -> RepositoryBrowser | None:
 
     from ai_council_review.github.client import GitHubClient
 
-    logger.debug(
+    logger.info(
         "No local checkout; building API-backed browser",
         repo=repo,
     )
