@@ -16,6 +16,12 @@ from ai_council_review.exceptions import GitHubAPIError, RateLimitError
 
 logger = structlog.get_logger()
 
+# Maximum number of seconds we are willing to sleep while waiting for a rate-
+# limit reset.  If the computed wait exceeds this cap we raise RateLimitError
+# immediately rather than hanging the process (the previous unbounded behaviour
+# caused a ~14-minute CI timeout on PR #140).
+_MAX_RATE_LIMIT_WAIT_SECONDS: int = 30
+
 
 class GitHubClient:
     """Wrapper around PyGithub and raw REST calls with retry logic."""
@@ -158,6 +164,11 @@ class GitHubClient:
         try:
             response = self._request("GET", url, headers=headers, params={"ref": ref})
             return response.text
+        except RateLimitError:
+            # Propagate so the fail-fast cap in _request is not silently
+            # swallowed — a rate-limit hang is exactly what we are guarding
+            # against, not a "file not found".
+            raise
         except Exception:
             logger.debug("File not found", path=path, ref=ref)
             return None
@@ -247,6 +258,19 @@ class GitHubClient:
                 if response.status_code == 403 and "rate limit" in response.text.lower():
                     reset_time = int(response.headers.get("X-RateLimit-Reset", 0))
                     wait = reset_time - int(time.time()) + 5
+                    if wait > _MAX_RATE_LIMIT_WAIT_SECONDS:
+                        # Fail fast rather than hanging the process.  A wait
+                        # this long (e.g. ~59 min in the pilot incident) would
+                        # stall CI for the remainder of its timeout budget.
+                        logger.error(
+                            "Rate limit wait exceeds cap; failing fast",
+                            wait_seconds=wait,
+                            cap_seconds=_MAX_RATE_LIMIT_WAIT_SECONDS,
+                        )
+                        raise RateLimitError(
+                            f"GitHub API rate limit exceeded; reset in {wait}s "
+                            f"(cap={_MAX_RATE_LIMIT_WAIT_SECONDS}s)"
+                        )
                     if wait > 0 and attempt < max_retries - 1:
                         logger.warning(
                             "Rate limited by GitHub, waiting until reset",

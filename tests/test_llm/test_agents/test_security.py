@@ -207,9 +207,15 @@ class TestRunSecurityAgent:
         mock_chain = MagicMock()
         mock_chain.invoke.return_value = _valid_finding_list()
 
-        with patch(
-            "ai_council_review.llm.agents.specialist.build_specialist_chain",
-            return_value=mock_chain,
+        with (
+            patch(
+                "ai_council_review.llm.agents.specialist.build_specialist_chain",
+                return_value=mock_chain,
+            ),
+            patch(
+                "ai_council_review.llm.agents.specialist.make_repository_tools",
+                return_value=[],
+            ),
         ):
             findings = run_security_agent(_make_state(), CouncilConfig(), None)
 
@@ -244,6 +250,10 @@ class TestRunSecurityAgent:
             patch(
                 "ai_council_review.llm.agents.specialist.build_specialist_chain",
                 return_value=mock_chain,
+            ),
+            patch(
+                "ai_council_review.llm.agents.specialist.make_repository_tools",
+                return_value=[],
             ),
             pytest.raises(BudgetExceededError),
         ):
