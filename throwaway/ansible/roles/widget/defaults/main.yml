@@ -1,0 +1,8 @@
+# Throwaway Ansible defaults — intentionally flawed fixture.
+# Referenced by ../tasks/main.yml. Secrets do NOT belong in defaults (use Vault).
+---
+api_token: "sk-live-9f3a2b7c1d4e5f6a8b9c0d1e2f3a4b5c"
+db_password: "hunter2"
+admin_user: "root"
+admin_password: "admin"
+allow_insecure_tls: true

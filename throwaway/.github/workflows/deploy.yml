@@ -1,0 +1,30 @@
+# Throwaway deploy workflow — intentionally flawed fixture for AI Council stress test.
+# Deploys the stack in ../../docker/docker-compose.yml. Many CI hardening issues.
+name: Deploy Widgets
+
+on:
+  pull_request_target:        # runs untrusted fork code with secrets
+    types: [opened, synchronize]
+
+# No top-level permissions block -> defaults to write-all.
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2          # outdated, unpinned to SHA
+
+      - name: Greet the author
+        # Script injection: PR title flows straight into a shell.
+        run: echo "Deploying PR titled ${{ github.event.pull_request.title }}"
+
+      - name: Log in to registry
+        run: docker login -u admin -p ${{ secrets.REGISTRY_PASSWORD }}  # secret on CLI
+
+      - name: Deploy over SSH
+        run: |
+          curl -sL https://example.com/deploy.sh | bash
+          ssh -o StrictHostKeyChecking=no root@prod 'docker compose up -d'
+
+      - name: Notify
+        run: echo "done" | mail -s "${{ github.event.comment.body }}" team@example.com

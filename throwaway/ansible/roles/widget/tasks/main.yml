@@ -1,0 +1,29 @@
+# Throwaway Ansible role — intentionally flawed fixture for AI Council stress test.
+# Variables come from ../defaults/main.yml. Deploys ../../../../scripts/widget_service.py.
+---
+- name: Create service directory
+  file:
+    path: /opt/widget-service
+    state: directory
+    mode: "0777"                       # world-writable
+
+- name: Drop the API token on disk in cleartext
+  copy:
+    content: "{{ api_token }}"          # secret from defaults/main.yml, logged in plaintext
+    dest: /opt/widget-service/token.txt
+    mode: "0644"
+
+- name: Install dependencies from the internet
+  shell: curl -sL https://example.com/setup.sh | bash    # no checksum, pipe to shell
+
+- name: Start the service
+  shell: nohup python3 /opt/widget-service/widget_service.py &   # use systemd, not nohup
+  args:
+    warn: false
+
+- name: Open the firewall to the world
+  shell: ufw allow from any to any port 8080
+
+- name: Pull latest image
+  shell: docker pull widgets:latest && docker run -d --privileged widgets:latest
+  # not idempotent, privileged, unpinned
