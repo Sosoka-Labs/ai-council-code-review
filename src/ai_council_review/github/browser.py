@@ -13,9 +13,53 @@ from ai_council_review.exceptions import GitHubAPIError
 
 logger = structlog.get_logger()
 
+# Refs that refer to the currently checked-out working tree rather than a
+# named historical ref.  For these we read the file directly from disk, which
+# removes subprocess overhead and any dependency on the ref actually being
+# fetched in a shallow clone.
+_HEAD_REFS: frozenset[str] = frozenset({"HEAD", ""})
+
+
+def _is_head_ref(ref: str) -> bool:
+    """Return True when *ref* refers to the current working-tree checkout.
+
+    Args:
+        ref: Git ref string (may be empty).
+
+    Returns:
+        True for HEAD / empty string variants; False for explicit branch/SHA refs.
+    """
+    return ref in _HEAD_REFS
+
+
+def _is_within_repo(target: Path, repo_path: Path) -> bool:
+    """Return True when *target* is inside *repo_path* (both resolved).
+
+    This guard prevents path-traversal attacks where a diff-provided path such
+    as ``../../etc/passwd`` would escape the repo root.
+
+    Args:
+        target: Resolved absolute path to the file being read.
+        repo_path: Resolved absolute path to the repo root.
+
+    Returns:
+        True when *target* is at or below *repo_path*.
+    """
+    try:
+        target.relative_to(repo_path)
+        return True
+    except ValueError:
+        return False
+
 
 class RepositoryBrowser:
-    """Browse repository files, preferring local git, falling back to GitHub API."""
+    """Browse repository files, preferring local git, falling back to GitHub API.
+
+    Read priority for any single file:
+    1. Filesystem (working tree) — only for HEAD/empty/None refs.
+    2. ``git show {ref}:{path}`` — for all other explicit refs.
+    3. GitHub Contents API — last resort, only when ``github_client`` is set.
+    """
 
     def __init__(
         self,
@@ -26,31 +70,46 @@ class RepositoryBrowser:
 
         Args:
             repo_path: Path to the local repository. If None, uses
-                GITHUB_WORKSPACE or current directory.
+                the current working directory.
             github_client: GitHubClient instance for API fallback.
+                Pass ``None`` to disable API calls entirely (preferred in CI
+                where the target repo is already checked out on disk).
         """
-        self.repo_path = Path(repo_path or Path.cwd())
+        self.repo_path = Path(repo_path or Path.cwd()).resolve()
         self.github_client = github_client
         self.api_calls = 0
 
-    def get_file(self, path: str, ref: str = "HEAD") -> str | None:
+    def get_file(self, path: str, ref: str | None = "HEAD") -> str | None:
         """Read a file at a specific ref.
 
-        Tries local git first, falls back to GitHub API.
+        Resolution order:
+        1. Filesystem (working tree) when *ref* is HEAD/empty/None.
+        2. ``git show`` for explicit non-HEAD refs.
+        3. GitHub Contents API when a client is attached and both local paths
+           return None.
 
         Args:
             path: File path relative to repo root.
-            ref: Git ref (branch, tag, or commit SHA).
+            ref: Git ref (branch, tag, or commit SHA).  Pass ``"HEAD"``,
+                ``""``, or ``None`` to read from the working tree.
 
         Returns:
             File contents as string, or None if not found.
         """
-        local = self._get_file_local(path, ref)
-        if local is not None:
-            return local
+        # Normalise None to empty string so _is_head_ref works uniformly.
+        effective_ref = ref if ref is not None else ""
+
+        if _is_head_ref(effective_ref):
+            content = self._get_file_filesystem(path)
+            if content is not None:
+                return content
+        else:
+            content = self._get_file_git(path, effective_ref)
+            if content is not None:
+                return content
 
         if self.github_client is not None:
-            return self._get_file_api(path, ref)
+            return self._get_file_api(path, effective_ref or "HEAD")
 
         return None
 
@@ -144,12 +203,48 @@ class RepositoryBrowser:
         except subprocess.CalledProcessError:
             return False
 
-    def _get_file_local(self, path: str, ref: str) -> str | None:
-        """Read file using local git.
+    def _get_file_filesystem(self, path: str) -> str | None:
+        """Read a file directly from the working-tree checkout.
+
+        This is the preferred path for HEAD reads: no subprocess, no network,
+        and it works even in shallow clones where the ref may not be present.
+
+        A path-traversal guard is applied before reading — if the resolved
+        absolute path escapes ``repo_path`` the call returns None rather than
+        reading an arbitrary file.  Diffs/paths are attacker-controllable and
+        must not be trusted without this check.
 
         Args:
-            path: File path.
-            ref: Git ref.
+            path: File path relative to repo root.
+
+        Returns:
+            File contents as a string, or None if the file does not exist or
+            the path would escape the repo root.
+        """
+        target = (self.repo_path / path).resolve()
+        if not _is_within_repo(target, self.repo_path):
+            logger.warning(
+                "Path traversal attempt blocked",
+                path=path,
+                repo_path=str(self.repo_path),
+            )
+            return None
+
+        try:
+            return target.read_text(errors="replace")
+        except (FileNotFoundError, IsADirectoryError, PermissionError):
+            return None
+
+    def _get_file_git(self, path: str, ref: str) -> str | None:
+        """Read a file at an explicit non-HEAD ref using ``git show``.
+
+        Use this for base-branch or historical comparisons where the ref is
+        meaningful.  For HEAD reads, prefer ``_get_file_filesystem`` which has
+        no subprocess overhead and works in shallow clones.
+
+        Args:
+            path: File path relative to repo root.
+            ref: Git ref (branch, tag, or commit SHA).
 
         Returns:
             File contents or None.

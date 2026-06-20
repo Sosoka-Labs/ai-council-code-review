@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-06-20
+
+Bugfix release. Eliminates a review hang caused by GitHub API rate limiting during cross-file browsing.
+
+### Fixed
+
+- **Cross-file browsing no longer hangs the review.** When the reviewed repository is already checked out (the normal GitHub Actions case), specialists now read unchanged files directly from the working tree and make **zero** GitHub Contents API calls. Previously the browser always attached an API client and silently fell back to it, so parallel specialists could exhaust the rate limit.
+- **Rate-limit waits are now bounded.** A `403` from the GitHub API previously slept until the reset window (observed: ~59 minutes), stalling the job until its CI timeout. The client now caps the wait and raises `RateLimitError` past the cap, so the run fails fast instead of hanging.
+
+### Changed
+
+- The repository browser reads HEAD/working-tree files from disk (with a path-traversal guard) and only uses `git show` for explicit non-HEAD refs; the GitHub Contents API is a last resort, used only when no local checkout is present.
+- The selected browser mode (filesystem-only vs. API-backed) is now logged at `INFO` so it is visible without enabling debug.
+
 ## [0.1.0] - 2026-06-18
 
 Initial public release.
@@ -24,5 +38,6 @@ Initial public release.
 - **CI/CD & repo automation** — SHA-pinned actions, least-privilege workflow permissions, concurrency control, dependency caching, Dependabot, CodeQL scanning (on public repos), an automated release workflow, and a PR template.
 - **Stateless design** — no database, vector store, or persistence layer.
 
-[Unreleased]: https://github.com/Sosoka-Labs/ai-council-code-review/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Sosoka-Labs/ai-council-code-review/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/Sosoka-Labs/ai-council-code-review/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Sosoka-Labs/ai-council-code-review/releases/tag/v0.1.0
