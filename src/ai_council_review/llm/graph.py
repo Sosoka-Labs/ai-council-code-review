@@ -17,6 +17,7 @@ from ai_council_review.llm.agents.router import run_router_agent
 from ai_council_review.llm.agents.specialist import run_specialist_agent
 from ai_council_review.llm.agents.synthesis import run_synthesis_agent
 from ai_council_review.llm.cost_tracker import CostCallbackHandler, CostTracker
+from ai_council_review.llm.selection import select_inline_findings
 from ai_council_review.models import FileInfo, Finding, ReviewComment, ReviewState
 from ai_council_review.skills.registry import SkillRegistry
 from ai_council_review.utils.patch_parser import get_position_for_line
@@ -291,54 +292,67 @@ def post_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
         if file.patch:
             patch_lookup[file.filename] = file.patch
 
-    # Convert findings to ReviewComments
-    # We use line + side instead of the deprecated position parameter.
-    # GitHub docs: "The position parameter is closing down. Use line instead."
-    comments: list[ReviewComment] = []
-    skipped_findings: list[Finding] = []
+    # Partition findings into those postable as inline comments (line resolves to
+    # an added line in the patch) and those that can only appear in the body.
+    postable: list[Finding] = []
+    non_postable: list[Finding] = []
     for finding in all_findings:
-        # Validate the finding line is in a changed patch (added line).
-        # If the line is not in the patch, we skip the inline comment.
-        is_valid = False
+        is_postable = False
         if finding.line is not None:
             patch = patch_lookup.get(finding.path)
             if patch:
-                # get_position_for_line only returns a position for added lines
-                is_valid = get_position_for_line(patch, finding.line) is not None
+                # get_position_for_line only returns a value for added lines
+                is_postable = get_position_for_line(patch, finding.line) is not None
 
-        if is_valid:
-            # Build comment body with agent attribution
-            body_parts: list[str] = []
-            if finding.agent:
-                body_parts.append(f"**🤖 {finding.agent.capitalize()} Agent**")
-                body_parts.append("")
-            body_parts.append(finding.body)
-            if finding.confidence is not None:
-                body_parts.append("")
-                body_parts.append(f"_Confidence: {finding.confidence:.0%}_")
-            body = "\n".join(body_parts)
-
-            comments.append(
-                ReviewComment(
-                    path=finding.path,
-                    line=finding.line,
-                    side="RIGHT",
-                    body=body,
-                )
-            )
+        if is_postable:
+            postable.append(finding)
         else:
-            skipped_findings.append(finding)
+            non_postable.append(finding)
             logger.info(
-                "Skipping inline comment (not an added line in patch)",
+                "Finding not postable as inline comment (not an added line in patch)",
                 path=finding.path,
                 line=finding.line,
             )
 
+    # Apply confidence threshold and hard cap — operates on postable set only.
+    selection = select_inline_findings(
+        postable,
+        max_comments=config.max_inline_comments,
+        min_confidence=config.min_confidence,
+    )
+
+    logger.info(
+        "Inline comment selection complete",
+        selected=len(selection.selected),
+        omitted_low_confidence=len(selection.omitted_low_confidence),
+        omitted_over_cap=len(selection.omitted_over_cap),
+        non_postable=len(non_postable),
+    )
+
+    # Build inline comment objects from the selected findings only.
+    comments: list[ReviewComment] = []
+    for finding in selection.selected:
+        body_parts: list[str] = []
+        if finding.agent:
+            body_parts.append(f"**🤖 {finding.agent.capitalize()} Agent**")
+            body_parts.append("")
+        body_parts.append(finding.body)
+        if finding.confidence is not None:
+            body_parts.append("")
+            body_parts.append(f"_Confidence: {finding.confidence:.0%}_")
+        body = "\n".join(body_parts)
+
+        comments.append(
+            ReviewComment(
+                path=finding.path,
+                line=finding.line,
+                side="RIGHT",
+                body=body,
+            )
+        )
+
     # Validate comments against changed files
     comments = publisher.validate_comments(comments, state.changed_files)
-
-    if skipped_findings:
-        logger.info("Skipped inline comments", count=len(skipped_findings))
 
     # Build summary from synthesis if available
     summary_text: str = state.summary or ""
@@ -350,8 +364,8 @@ def post_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
             severity_counts[finding.severity.value] = (
                 severity_counts.get(finding.severity.value, 0) + 1
             )
-            agent_name = finding.agent or "unknown"
-            agent_counts[agent_name] = agent_counts.get(agent_name, 0) + 1
+            agent_name_str = finding.agent or "unknown"
+            agent_counts[agent_name_str] = agent_counts.get(agent_name_str, 0) + 1
 
         summary_parts.append("\n**Findings by severity:**\n")
         for severity, count in sorted(
@@ -361,14 +375,41 @@ def post_node(state: ReviewState, config: CouncilConfig) -> dict[str, Any]:
             summary_parts.append(f"- {severity.capitalize()}: {count}")
 
         summary_parts.append("\n**Findings by agent:**\n")
-        for agent_name, count in sorted(agent_counts.items()):
-            summary_parts.append(f"- {agent_name.capitalize()}: {count}")
+        for agent_name_str, count in sorted(agent_counts.items()):
+            summary_parts.append(f"- {agent_name_str.capitalize()}: {count}")
 
         summary_parts.append(f"\n**Total findings:** {len(all_findings)}")
         summary_parts.append(
             "\n---\n\n*This review was generated automatically. Please verify all suggestions before applying.*"
         )
         summary_text = "\n".join(summary_parts)
+
+    # Append a withheld-findings note when any postable findings were not posted inline.
+    withheld_findings = selection.omitted_low_confidence + selection.omitted_over_cap
+    total_withheld = len(withheld_findings) + len(non_postable)
+    if total_withheld > 0:
+        n_selected = len(selection.selected)
+        n_below_threshold = len(selection.omitted_low_confidence)
+        n_over_cap = len(selection.omitted_over_cap)
+        n_outside_lines = len(non_postable)
+
+        withheld_parts: list[str] = [
+            "",
+            "---",
+            "",
+            f"ℹ️ {n_selected} comment(s) posted inline (ranked by severity, then "
+            f"confidence). {total_withheld} finding(s) withheld — "
+            f"{n_below_threshold} below the confidence threshold, "
+            f"{n_over_cap} over the inline cap ({config.max_inline_comments}), "
+            f"{n_outside_lines} outside changed lines. Full list below:",
+            "",
+            "**Withheld findings:**",
+        ]
+        for f in withheld_findings + non_postable:
+            first_line = f.body.splitlines()[0] if f.body else ""
+            withheld_parts.append(f"- `{f.path}:{f.line}` — {f.severity.value} — {first_line}")
+
+        summary_text = summary_text + "\n" + "\n".join(withheld_parts)
 
     verdict = state.verdict or "comment"
 

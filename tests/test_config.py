@@ -89,6 +89,51 @@ class TestCouncilConfig:
         assert config.comment_on_forks is False
         assert "package-lock.json" in config.skip_patterns
 
+    def test_max_inline_comments_default(self) -> None:
+        """max_inline_comments defaults to 20."""
+        config = CouncilConfig()
+        assert config.max_inline_comments == 20
+
+    def test_min_confidence_default(self) -> None:
+        """min_confidence defaults to 0.0."""
+        config = CouncilConfig()
+        assert config.min_confidence == 0.0
+
+    def test_max_inline_comments_can_be_configured(self) -> None:
+        """max_inline_comments accepts any non-negative integer."""
+        config = CouncilConfig(max_inline_comments=5)
+        assert config.max_inline_comments == 5
+
+    def test_max_inline_comments_negative_raises(self) -> None:
+        """max_inline_comments below 0 raises ValidationError."""
+        with pytest.raises(ValidationError):
+            CouncilConfig(max_inline_comments=-1)
+
+    def test_min_confidence_can_be_configured(self) -> None:
+        """min_confidence accepts any value in [0.0, 1.0]."""
+        config = CouncilConfig(min_confidence=0.75)
+        assert config.min_confidence == 0.75
+
+    def test_min_confidence_below_zero_raises(self) -> None:
+        """min_confidence below 0.0 raises ValidationError."""
+        with pytest.raises(ValidationError):
+            CouncilConfig(min_confidence=-0.01)
+
+    def test_min_confidence_above_one_raises(self) -> None:
+        """min_confidence above 1.0 raises ValidationError."""
+        with pytest.raises(ValidationError):
+            CouncilConfig(min_confidence=1.01)
+
+    def test_min_confidence_boundary_zero_valid(self) -> None:
+        """min_confidence=0.0 is the valid lower bound."""
+        config = CouncilConfig(min_confidence=0.0)
+        assert config.min_confidence == 0.0
+
+    def test_min_confidence_boundary_one_valid(self) -> None:
+        """min_confidence=1.0 is the valid upper bound."""
+        config = CouncilConfig(min_confidence=1.0)
+        assert config.min_confidence == 1.0
+
     def test_custom_config(self) -> None:
         """Test creating custom config."""
         config = CouncilConfig(

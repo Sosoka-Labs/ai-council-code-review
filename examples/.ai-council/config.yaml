@@ -39,6 +39,16 @@ total_timeout_seconds: 600      # Overall workflow timeout (10 minutes)
 debug: false                    # Dump debug artifact when true
 rate_limit_threshold: 50        # Enter conservative mode below this threshold
 
+# ── Inline Comment Limits ────────────────────────────────────────────────────
+# Prevents GitHub 502 / secondary rate-limit errors caused by oversized reviews.
+#
+# max_inline_comments: 20       # Hard cap on inline comments per review.
+#                               # Findings ranked by severity then confidence;
+#                               # excess findings are summarised in the review body.
+# min_confidence: 0.0           # Drop findings whose confidence is below this
+#                               # threshold (0.0–1.0). Withheld findings still
+#                               # appear in the review body.
+
 # ── Agent Configuration ─────────────────────────────────────────────────────
 # Each agent can be enabled/disabled, assigned a model and provider,
 # and given a custom system prompt.

@@ -17,7 +17,6 @@ from ai_council_review.models import (
     FileInfo,
     Finding,
     PRMetadata,
-    ReviewComment,
     ReviewState,
     Severity,
 )
@@ -212,7 +211,12 @@ class TestPostNode:
     """Tests for post_node."""
 
     def test_post_node(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Mock Publisher and GitHubClient, verify review is posted."""
+        """Mock Publisher and GitHubClient, verify review is posted.
+
+        The finding here has no ``line`` set (only a legacy ``position``), so it
+        is not postable as an inline comment.  It will be moved to the withheld
+        section of the review body rather than posted inline.
+        """
         config = CouncilConfig()
         state = ReviewState(
             pr_metadata=PRMetadata(
@@ -250,23 +254,23 @@ class TestPostNode:
             patch("ai_council_review.llm.graph.Publisher") as mock_publisher,
         ):
             mock_publisher_instance = MagicMock()
-            mock_publisher_instance.validate_comments.return_value = [
-                ReviewComment(path="src/main.py", position=3, body="SQL injection")
-            ]
+            # No line → not postable → validate_comments is never called with it.
+            mock_publisher_instance.validate_comments.return_value = []
             mock_publisher.return_value = mock_publisher_instance
 
             result = post_node(state, config)
 
-        assert result["summary"] == "## AI Code Review\n\nFound issues."
+        # Finding had no line, so it is non-postable and withheld.
+        # The body note is appended to the pre-built summary.
+        assert result["summary"].startswith("## AI Code Review\n\nFound issues.")
+        assert "withheld" in result["summary"].lower() or "ℹ️" in result["summary"]
         assert result["verdict"] == "comment"
-        assert len(result["github_comments"]) == 1
+        # No inline comment was postable.
+        assert len(result["github_comments"]) == 0
         mock_publisher_instance.post_review.assert_called_once()
         call_kwargs = mock_publisher_instance.post_review.call_args.kwargs
         assert call_kwargs["pr_number"] == 42
         assert call_kwargs["commit_id"] == "abc123"
-        assert call_kwargs["comments"] == [
-            ReviewComment(path="src/main.py", position=3, body="SQL injection")
-        ]
 
     def test_post_node_no_findings(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Verify 'No issues found' summary is posted when there are no findings."""
@@ -559,3 +563,219 @@ class TestM4CapGuardrail:
         assert len(result["agents_needed"]) == 6
         assert result["agents_needed"] == six_agents
         assert result["review_depth"] == "deep"
+
+
+# ---------------------------------------------------------------------------
+# TestPostNodeSelection — inline comment cap and confidence threshold tests
+# ---------------------------------------------------------------------------
+
+
+def _make_pr_state(
+    findings: dict[str, list[Finding]],
+    patch: str,
+    summary: str = "",
+) -> ReviewState:
+    """Build a ReviewState wired up for post_node testing.
+
+    Args:
+        findings: Dict of agent_name → list[Finding].
+        patch: Unified diff patch text for ``src/main.py``.
+        summary: Optional pre-built summary string.
+
+    Returns:
+        A ReviewState ready to pass to post_node.
+    """
+    return ReviewState(
+        pr_metadata=PRMetadata(
+            number=7,
+            title="Test PR",
+            state="open",
+            author="alice",
+            author_association="CONTRIBUTOR",
+            base_ref="main",
+            base_sha="base",
+            head_ref="feat",
+            head_sha="deadbeef",
+        ),
+        changed_files=[FileInfo(filename="src/main.py", status="modified", patch=patch)],
+        agent_outputs=findings,
+        summary=summary,
+        verdict="comment",
+    )
+
+
+def _run_post_node(
+    state: ReviewState,
+    config: CouncilConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> dict:
+    """Run post_node with GitHub API mocked out.
+
+    Args:
+        state: ReviewState to pass.
+        config: CouncilConfig to pass.
+        monkeypatch: pytest monkeypatch fixture.
+
+    Returns:
+        The dict returned by post_node.
+    """
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+
+    with (
+        patch("ai_council_review.llm.graph.GitHubClient"),
+        patch("ai_council_review.llm.graph.Publisher") as mock_pub_cls,
+    ):
+        mock_pub = MagicMock()
+        mock_pub.validate_comments.side_effect = lambda comments, _files: comments
+        mock_pub_cls.return_value = mock_pub
+
+        result = post_node(state, config)
+
+    return result
+
+
+class TestPostNodeSelection:
+    """Tests for post_node inline comment cap, confidence threshold, and body note."""
+
+    # A patch that adds lines 1-5 of src/main.py.
+    _PATCH_LINES_1_TO_5 = (
+        "@@ -0,0 +1,5 @@\n+line one\n+line two\n+line three\n+line four\n+line five"
+    )
+
+    def _finding_at_line(
+        self,
+        line: int,
+        severity: Severity = Severity.MEDIUM,
+        confidence: float = 0.8,
+        body: str | None = None,
+    ) -> Finding:
+        return Finding(
+            path="src/main.py",
+            severity=severity,
+            category="test",
+            body=body or f"Finding at line {line}",
+            confidence=confidence,
+            line=line,
+            agent="security",
+        )
+
+    def test_post_node_respects_max_inline_comments(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """post_node never posts more inline comments than max_inline_comments."""
+        config = CouncilConfig(max_inline_comments=2, min_confidence=0.0)
+        # 5 findings all pointing to valid added lines.
+        findings = [self._finding_at_line(i) for i in range(1, 6)]
+        state = _make_pr_state({"security": findings}, self._PATCH_LINES_1_TO_5)
+
+        result = _run_post_node(state, config, monkeypatch)
+
+        # Only 2 should be selected for inline posting.
+        assert len(result["github_comments"]) == 2
+
+    def test_post_node_withheld_findings_appear_in_body(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When findings are withheld, the review body contains a note."""
+        config = CouncilConfig(max_inline_comments=2, min_confidence=0.0)
+        findings = [self._finding_at_line(i) for i in range(1, 6)]
+        state = _make_pr_state({"security": findings}, self._PATCH_LINES_1_TO_5)
+
+        result = _run_post_node(state, config, monkeypatch)
+
+        body = result["summary"]
+        assert "withheld" in body.lower() or "omitted" in body.lower() or "ℹ️" in body
+
+    def test_post_node_below_threshold_excluded_from_inline(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Findings below min_confidence are not posted as inline comments."""
+        config = CouncilConfig(max_inline_comments=10, min_confidence=0.7)
+        findings = [
+            self._finding_at_line(1, confidence=0.9),  # above threshold
+            self._finding_at_line(2, confidence=0.5),  # below threshold
+            self._finding_at_line(3, confidence=0.8),  # above threshold
+        ]
+        state = _make_pr_state({"security": findings}, self._PATCH_LINES_1_TO_5)
+
+        result = _run_post_node(state, config, monkeypatch)
+
+        # Only lines 1 and 3 should have comments.
+        inline_lines = {c.line for c in result["github_comments"]}
+        assert 1 in inline_lines
+        assert 3 in inline_lines
+        assert 2 not in inline_lines
+
+    def test_post_node_below_threshold_finding_still_noted_in_body(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Below-threshold findings are referenced in the withheld note in the body."""
+        config = CouncilConfig(max_inline_comments=10, min_confidence=0.9)
+        findings = [
+            self._finding_at_line(1, confidence=0.5, body="Low confidence issue"),
+        ]
+        state = _make_pr_state({"security": findings}, self._PATCH_LINES_1_TO_5)
+
+        result = _run_post_node(state, config, monkeypatch)
+
+        # No inline comments posted.
+        assert len(result["github_comments"]) == 0
+        # But the body mentions the withheld finding.
+        assert "src/main.py" in result["summary"]
+
+    def test_post_node_non_postable_findings_noted_in_body(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Findings whose line is not an added line are still noted in the body."""
+        config = CouncilConfig(max_inline_comments=10, min_confidence=0.0)
+        # Line 999 is not in the patch — not postable.
+        findings = [
+            Finding(
+                path="src/main.py",
+                severity=Severity.HIGH,
+                category="test",
+                body="Finding on non-added line",
+                confidence=0.9,
+                line=999,
+                agent="security",
+            )
+        ]
+        state = _make_pr_state({"security": findings}, self._PATCH_LINES_1_TO_5)
+
+        result = _run_post_node(state, config, monkeypatch)
+
+        # Nothing posted inline.
+        assert len(result["github_comments"]) == 0
+        # The body still mentions it.
+        assert "src/main.py" in result["summary"]
+
+    def test_post_node_all_findings_below_threshold_body_note_counts(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Body note accurately counts below-threshold vs over-cap vs outside-lines."""
+        config = CouncilConfig(max_inline_comments=1, min_confidence=0.95)
+        findings = [
+            # 1 above threshold (will be selected, not withheld as over-cap)
+            self._finding_at_line(1, confidence=0.99),
+            # 1 over cap (above threshold but beyond cap)
+            self._finding_at_line(2, confidence=0.96),
+            # 1 below threshold
+            self._finding_at_line(3, confidence=0.5),
+            # 1 non-postable (line not in patch)
+            Finding(
+                path="src/main.py",
+                severity=Severity.LOW,
+                category="test",
+                body="Non-postable",
+                confidence=0.99,
+                line=999,
+                agent="security",
+            ),
+        ]
+        state = _make_pr_state({"security": findings}, self._PATCH_LINES_1_TO_5)
+
+        result = _run_post_node(state, config, monkeypatch)
+
+        body = result["summary"]
+        # 1 below threshold, 1 over cap, 1 non-postable → 3 withheld total
+        assert "3 finding(s) withheld" in body
+        assert len(result["github_comments"]) == 1  # only the first above-threshold

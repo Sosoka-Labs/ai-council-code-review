@@ -12,8 +12,9 @@ from ai_council_review.models import FileInfo, ReviewComment
 
 logger = structlog.get_logger()
 
-# GitHub allows max 100 comments per review
-MAX_COMMENTS_PER_REVIEW = 100
+# GitHub allows up to 100 comments per review; we keep batches small to
+# avoid 502 Bad Gateway errors from oversized payloads.
+MAX_COMMENTS_PER_REVIEW = 30
 
 
 class Publisher:
@@ -36,7 +37,7 @@ class Publisher:
     ) -> None:
         """Post a PR review with inline comments.
 
-        Handles batching if there are more than 100 comments.
+        Handles batching if there are more than ``MAX_COMMENTS_PER_REVIEW`` comments.
 
         Args:
             pr_number: PR number.

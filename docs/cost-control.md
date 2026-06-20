@@ -36,6 +36,15 @@ Enforce hard PR-size limits to prevent runaway costs. PRs that exceed any limit 
 - `max_lines: 2000` — skip PRs with more than 2000 added/deleted lines.
 - `max_diff_size: 50000` — skip PRs with a diff larger than 50 KB.
 
+## Inline comment volume
+
+Posting a very large number of inline comments in a single GitHub review can trigger 502 Bad Gateway errors or secondary rate-limit penalties. Two settings prevent this:
+
+- `max_inline_comments: 20` — hard cap on inline comments per review. Findings are ranked by severity (critical first) then confidence before the cap is applied; the lowest-priority excess findings are moved to the review body instead.
+- `min_confidence: 0.0` — confidence threshold in the range `[0.0, 1.0]`. Findings with a confidence score below this value are excluded from inline posting (they still appear in the review body).
+
+All withheld findings — whether due to low confidence, the cap, or because their line falls outside the changed diff — are listed in the review body, so nothing is silently discarded.
+
 ## Timeouts
 
 | Key | Default | Meaning |

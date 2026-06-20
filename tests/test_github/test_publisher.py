@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from ai_council_review.github.client import GitHubClient
-from ai_council_review.github.publisher import Publisher
+from ai_council_review.github.publisher import MAX_COMMENTS_PER_REVIEW, Publisher
 from ai_council_review.models import FileInfo, ReviewComment
 
 
@@ -78,3 +78,46 @@ class TestPublisher:
         valid = publisher.validate_comments(comments, changed_files)
         assert len(valid) == 1
         assert valid[0].path == "src/main.py"
+
+    def test_max_comments_per_review_is_30(self) -> None:
+        """MAX_COMMENTS_PER_REVIEW must be 30 to avoid 502 errors on large reviews."""
+        assert MAX_COMMENTS_PER_REVIEW == 30
+
+    def test_batching_uses_30_per_batch(self, mock_client: MagicMock) -> None:
+        """When more than 30 comments are posted, they are split into batches of 30."""
+        publisher = Publisher(mock_client)
+        # 31 comments should produce 2 batches: one of 30, one of 1.
+        comments = [
+            ReviewComment(path="src/main.py", position=i, body=f"Comment {i}") for i in range(31)
+        ]
+
+        publisher.post_review(
+            pr_number=1,
+            summary="summary",
+            comments=comments,
+            commit_id="abc",
+        )
+
+        assert mock_client.post_review.call_count == 2
+        first_call = mock_client.post_review.call_args_list[0]
+        second_call = mock_client.post_review.call_args_list[1]
+        assert len(first_call.kwargs["comments"]) == 30
+        assert len(second_call.kwargs["comments"]) == 1
+
+    def test_exactly_30_comments_is_single_batch(self, mock_client: MagicMock) -> None:
+        """Exactly 30 comments fits in one batch; no second batch is created."""
+        publisher = Publisher(mock_client)
+        comments = [
+            ReviewComment(path="src/main.py", position=i, body=f"Comment {i}") for i in range(30)
+        ]
+
+        publisher.post_review(
+            pr_number=1,
+            summary="summary",
+            comments=comments,
+            commit_id="abc",
+        )
+
+        assert mock_client.post_review.call_count == 1
+        call = mock_client.post_review.call_args
+        assert len(call.kwargs["comments"]) == 30
